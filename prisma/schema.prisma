@@ -520,6 +520,7 @@ enum ActivityType {
   ASSET_UNASSIGNED
   ASSET_MAINTENANCE
   SOFTWARE_UPDATED
+  ASSIGNED  // Alias for ASSET_ASSIGNED for backward compatibility
   
   // Workflow specific
   WORKFLOW_STARTED
@@ -532,6 +533,8 @@ enum ActivityType {
   EMPLOYEE_RESIGNED
   EMPLOYEE_LOGIN
   EMPLOYEE_LOGOUT
+  ONBOARDING_COMPLETED
+  ONBOARDING_FAILED
   
   // Document specific
   DOCUMENT_REVIEWED

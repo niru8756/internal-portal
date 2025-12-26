@@ -114,7 +114,7 @@ export async function POST(request: NextRequest) {
     await logTimelineActivity({
       entityType: 'EMPLOYEE',
       entityId: employeeId,
-      activityType: 'RESOURCE_ASSIGNED',
+      activityType: 'ASSET_ASSIGNED',
       title: `Resource assigned: ${resource.name}`,
       description: `${resource.name} (${resource.type}) was assigned to ${employee.name} by ${currentUser.name}`,
       metadata: {
