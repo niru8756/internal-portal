@@ -13,13 +13,35 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get('limit') || '12');
     const skip = (page - 1) * limit;
 
+    // Get the authenticated user
+    const token = request.cookies.get('auth-token')?.value;
+    const currentUser = token ? await getUserFromToken(token) : null;
+    
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
     let whereClause = {};
-    if (assignedTo) {
-      // Handle both single assignment (assignedToId) and multiple assignments (assignedToIds)
+    
+    // Role-based filtering
+    if (currentUser.role === 'CEO' || currentUser.role === 'CTO') {
+      // CEO and CTO can see all resources
+      if (assignedTo) {
+        // Handle both single assignment (assignedToId) and multiple assignments (assignedToIds)
+        whereClause = {
+          OR: [
+            { assignedToId: assignedTo },
+            { assignedToIds: { has: assignedTo } }
+          ]
+        };
+      }
+      // If no assignedTo filter, show all resources (no additional filtering)
+    } else {
+      // Regular employees can only see resources assigned to them
       whereClause = {
         OR: [
-          { assignedToId: assignedTo },
-          { assignedToIds: { has: assignedTo } }
+          { assignedToId: currentUser.id },
+          { assignedToIds: { has: currentUser.id } }
         ]
       };
     }

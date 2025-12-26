@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
 import AccessRequestForm from '@/components/AccessRequestForm';
 
 interface AccessRequest {
@@ -33,12 +34,15 @@ interface AccessRequest {
 }
 
 export default function AccessPage() {
+  const { user } = useAuth();
   const [accessRequests, setAccessRequests] = useState<AccessRequest[]>([]);
   const [resources, setResources] = useState<Array<{ id: string; name: string; type: string }>>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+
+  const isCEOOrCTO = user?.role === 'CEO' || user?.role === 'CTO';
 
   const fetchAccessRequests = async () => {
     setLoading(true);
@@ -159,7 +163,10 @@ export default function AccessPage() {
         <div className="sm:flex-auto">
           <h1 className="text-2xl font-semibold text-gray-900">Access Management</h1>
           <p className="mt-2 text-sm text-gray-700">
-            Manage access requests and permissions for company resources. All requests automatically create approval workflows.
+            {isCEOOrCTO 
+              ? "Manage access requests and permissions for company resources. All requests automatically create approval workflows."
+              : "View your access requests and request new permissions for company resources. All requests automatically create approval workflows."
+            }
           </p>
         </div>
         <div className="mt-4 sm:mt-0 sm:ml-16 sm:flex-none space-x-3 flex">
@@ -182,7 +189,7 @@ export default function AccessPage() {
                 <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
                 </svg>
-                Access History 
+                {isCEOOrCTO ? 'Load All Requests' : 'Load My Requests'}
               </>
             )}
           </button>
@@ -218,7 +225,10 @@ export default function AccessPage() {
           </svg>
           <h3 className="mt-2 text-sm font-medium text-gray-900">Access requests not loaded</h3>
           <p className="mt-1 text-sm text-gray-500">
-            Click "Load My Requests" to view your access history or "Request Access" to submit a new request.
+            {isCEOOrCTO 
+              ? 'Click "Load All Requests" to view all company access requests or "Request Access" to submit a new request.'
+              : 'Click "Load My Requests" to view your access history or "Request Access" to submit a new request.'
+            }
           </p>
         </div>
       )}
@@ -308,7 +318,12 @@ export default function AccessPage() {
             />
           </svg>
           <h3 className="mt-2 text-sm font-medium text-gray-900">No access requests</h3>
-          <p className="mt-1 text-sm text-gray-500">Get started by creating a new access request.</p>
+          <p className="mt-1 text-sm text-gray-500">
+            {isCEOOrCTO 
+              ? 'No access requests found in the system. Get started by creating a new access request.'
+              : 'You have no access requests yet. Get started by creating a new access request.'
+            }
+          </p>
         </div>
       )}
 

@@ -36,6 +36,7 @@ export default function EmployeesPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [viewingDependencies, setViewingDependencies] = useState<string | null>(null);
@@ -78,6 +79,9 @@ export default function EmployeesPage() {
   const totalPages = Math.ceil(totalEmployees / itemsPerPage);
 
   const handleCreateEmployee = async (employeeData: any) => {
+    if (submitting) return; // Prevent double submissions
+    
+    setSubmitting(true);
     try {
       if (editingEmployee) {
         // Update existing employee
@@ -123,6 +127,8 @@ export default function EmployeesPage() {
     } catch (error) {
       console.error('Error saving employee:', error);
       alert('Error saving employee');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -587,6 +593,7 @@ export default function EmployeesPage() {
           employees={employees}
           editingEmployee={editingEmployee}
           isEditing={!!editingEmployee}
+          submitting={submitting}
         />
       )}
 

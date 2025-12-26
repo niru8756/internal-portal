@@ -221,8 +221,20 @@ export async function POST(request: NextRequest) {
         }
       }, { status: 201 });
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error creating employee:', error);
+    
+    // Handle specific Prisma errors
+    if (error.code === 'P2002') {
+      // Unique constraint violation
+      if (error.meta?.target?.includes('email')) {
+        return NextResponse.json(
+          { error: 'An employee with this email address already exists' }, 
+          { status: 400 }
+        );
+      }
+    }
+    
     return NextResponse.json({ error: 'Failed to create employee' }, { status: 500 });
   }
 }

@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
 
 export default function SignupPage() {
@@ -15,6 +16,7 @@ export default function SignupPage() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
+  const { checkAuth } = useAuth();
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setFormData({
@@ -61,7 +63,8 @@ export default function SignupPage() {
       const data = await response.json();
 
       if (response.ok) {
-        // Account activated successfully - redirect to dashboard
+        // Account activated successfully - update auth context and redirect to dashboard
+        await checkAuth(); // This will update the user state in AuthContext
         router.push('/');
       } else {
         setError(data.error || 'Account activation failed');

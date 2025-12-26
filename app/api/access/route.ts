@@ -7,9 +7,32 @@ import { getUserFromToken } from '@/lib/auth';
 import { createOperationalWorkflow } from '@/lib/workflowService';
 import { trackEntityUpdate } from '@/lib/changeTracker';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    // Get the authenticated user
+    const token = request.cookies.get('auth-token')?.value;
+    const currentUser = token ? await getUserFromToken(token) : null;
+    
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
+    }
+
+    // Role-based filtering
+    let whereClause = {};
+    
+    // CEO and CTO can see all access requests
+    if (currentUser.role === 'CEO' || currentUser.role === 'CTO') {
+      // No filtering - show all requests
+      whereClause = {};
+    } else {
+      // Regular employees can only see their own requests
+      whereClause = {
+        employeeId: currentUser.id
+      };
+    }
+
     const accessRequests = await prisma.access.findMany({
+      where: whereClause,
       include: {
         employee: {
           select: {

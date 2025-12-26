@@ -77,10 +77,9 @@ export default function ResourcesPage() {
     try {
       let url = `/api/resources?page=${currentPage}&limit=${itemsPerPage}`;
       
-      // If user doesn't have permission to view all resources, only show their own
-      if (permissions && !permissions.canViewAllResources) {
-        url += `&assignedTo=${user?.id}`;
-      } else if (viewMode === 'own' && user) {
+      // The API now handles role-based filtering automatically
+      // Only add assignedTo filter if explicitly viewing own resources
+      if (viewMode === 'own' && user) {
         url += `&assignedTo=${user.id}`;
       }
       

@@ -89,7 +89,7 @@ export default function AccessRequestForm({ onSubmit, onCancel, resources }: Acc
 
   // Use actual hardware resources from database, with fallback to predefined options if none exist
   const hardwareOptions = hardwareResources.length > 0 
-    ? hardwareResources.map(resource => resource.name)
+    ? [...new Set(hardwareResources.map(resource => resource.name))] // Remove duplicates
     : [
         'Laptop (MacBook Pro)',
         'Laptop (Dell XPS)',
@@ -230,8 +230,8 @@ export default function AccessRequestForm({ onSubmit, onCancel, resources }: Acc
                 className="mt-1 block w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-blue-500 focus:border-blue-500"
               >
                 <option value="">Select Hardware (Optional)</option>
-                {hardwareOptions.map((hardware) => (
-                  <option key={hardware} value={hardware}>
+                {hardwareOptions.map((hardware, index) => (
+                  <option key={`${hardware}-${index}`} value={hardware}>
                     {hardware}
                   </option>
                 ))}
