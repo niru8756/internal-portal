@@ -1,0 +1,543 @@
+// prisma/schema.prisma
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Employee {
+  id          String    @id @default(uuid())
+  name        String
+  email       String    @unique
+  password    String?   // Optional for existing employees, required for new signups
+  role        Role
+  department  String
+  managerId   String?
+  manager     Employee? @relation("ManagerEmployees", fields: [managerId], references: [id])
+  subordinates Employee[] @relation("ManagerEmployees")
+  status      Status
+  joiningDate DateTime
+  phone       String?
+  address     String?
+  salary      Float?
+  emergencyContact String?
+  emergencyPhone   String?
+  
+  // Password reset fields
+  resetToken       String?
+  resetTokenExpiry DateTime?
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  resources       Resource[]
+  assignedResources Resource[] @relation("AssignedResources")
+  accessRequests  Access[] @relation("EmployeeAccessRequests")
+  approvals       Access[] @relation("EmployeeAccessApprovals")
+  policies        Policy[]
+  documents       Document[]
+  auditLogs       AuditLog[] @relation("EmployeeAudit")
+  
+  // Approval workflows
+  requestedWorkflows ApprovalWorkflow[] @relation("RequesterWorkflows")
+  approvedWorkflows  ApprovalWorkflow[] @relation("ApproverWorkflows")
+  
+  // Activity timeline
+  performedActivities ActivityTimeline[] @relation("EmployeeActivities")
+  timelineActivities  ActivityTimeline[] @relation("EmployeeTimelineActivities")
+}
+
+
+model Resource {
+  id             String    @id @default(uuid())
+  name           String
+  type           ResourceType
+  category       String?   // More flexible than enum
+  
+  // Basic info
+  description    String?
+  ownerId        String?
+  owner          Employee? @relation(fields: [ownerId], references: [id])
+  
+  // Who this resource is assigned to / who needs it
+  assignedToId   String?
+  assignedTo     Employee? @relation("AssignedResources", fields: [assignedToId], references: [id])
+  
+  // Multiple assignments for SOFTWARE and CLOUD resources
+  assignedToIds  String[]  // Array of employee IDs for multi-assignment
+  
+  // Permission level for this resource
+  permissionLevel AccessPermissionLevel @default(READ)
+  
+  status         Status
+  
+  // Physical asset fields
+  serialNumber   String?   @unique
+  modelNumber    String?
+  brand          String?
+  location       String?
+  purchaseDate   DateTime?
+  warrantyExpiry DateTime?
+  value          Float?
+  
+  // Technical specifications (for hardware/software)
+  specifications Json?     // Store technical specs as JSON
+  operatingSystem String?
+  osVersion      String?
+  processor      String?
+  memory         String?   // RAM
+  storage        String?   // Storage capacity
+  
+  // Network and connectivity
+  ipAddress      String?
+  macAddress     String?
+  hostname       String?
+  
+  // Software and licensing
+  softwareVersion String?
+  licenseKey     String?
+  licenseExpiry  DateTime?
+  installedSoftware Json?   // Array of installed software
+  
+  // Cloud and subscription details
+  subscriptionId String?
+  subscriptionExpiry DateTime?
+  monthlyRate    Float?    // Monthly cost
+  annualRate     Float?    // Annual cost
+  provider       String?   // Cloud provider or vendor
+  serviceLevel   String?   // Service tier/level
+  
+  // Access and usage
+  assignedDate   DateTime?
+  expiryDate     DateTime?
+  lastUsed       DateTime?
+  usageMetrics   Json?     // Usage statistics
+  
+  // Maintenance and updates
+  lastMaintenance DateTime?
+  nextMaintenance DateTime?
+  lastUpdate     DateTime?
+  updateVersion  String?
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  
+  // Relations
+  accessLogs     Access[]
+  approvalWorkflows ApprovalWorkflow[]
+  maintenanceHistory ResourceMaintenance[]
+  softwareUpdates    SoftwareUpdate[]
+  timelineActivities ActivityTimeline[]
+}
+
+model ResourceMaintenance {
+  id          String   @id @default(uuid())
+  resourceId  String
+  resource    Resource @relation(fields: [resourceId], references: [id])
+  type        MaintenanceType
+  description String?
+  performedBy String?
+  performedAt DateTime
+  cost        Float?
+  notes       String?
+  nextDue     DateTime?
+  createdAt   DateTime @default(now())
+}
+
+model Access {
+  id          String   @id @default(uuid())
+  
+  // Employee who requested access
+  employeeId  String
+  employee    Employee @relation("EmployeeAccessRequests", fields: [employeeId], references: [id])
+  
+  // Approver (manager/admin)
+  approverId  String?
+  approver    Employee? @relation("EmployeeAccessApprovals", fields: [approverId], references: [id])
+  
+  resourceId  String?  // Made optional to support hardware-only requests
+  resource    Resource? @relation(fields: [resourceId], references: [id])
+  
+  // Hardware request information (for hardware-only requests)
+  hardwareRequest String? // Store the hardware item name
+  
+  status      AccessStatus
+  permissionLevel AccessPermissionLevel @default(READ) // New field for permission level
+  justification   String?  // Store the justification
+  
+  requestedAt DateTime @default(now())
+  approvedAt  DateTime?
+  grantedAt   DateTime?
+  revokedAt   DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+
+
+model Policy {
+  id        String   @id @default(uuid())
+  title     String
+  category  PolicyCategory
+  ownerId   String?
+  owner     Employee? @relation(fields: [ownerId], references: [id])
+  version   Int      @default(1)
+  status    PolicyStatus
+  content   String?  // Make content optional since we might have PDF instead
+  filePath  String?  // Path to uploaded PDF file
+  fileName  String?  // Original filename
+  fileSize  Int?     // File size in bytes
+  mimeType  String?  // MIME type of uploaded file
+  effectiveDate DateTime? // When the policy becomes effective
+  expiryDate    DateTime? // When the policy expires
+  reviewDate    DateTime? // When the policy should be reviewed next
+  lastReviewDate DateTime? // When the policy was last reviewed
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  approvalWorkflows ApprovalWorkflow[]
+  timelineActivities ActivityTimeline[]
+}
+
+model Document {
+  id        String   @id @default(uuid())
+  title     String
+  category  DocumentCategory
+  content   String
+  ownerId   String?
+  owner     Employee? @relation(fields: [ownerId], references: [id])
+  version   Int      @default(1)
+  status    DocumentStatus
+  tags      String[]
+  filePath  String?
+  fileSize  Int?
+  mimeType  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  
+  approvalWorkflows ApprovalWorkflow[]
+  timelineActivities ActivityTimeline[]
+}
+
+
+
+model SoftwareUpdate {
+  id          String   @id @default(uuid())
+  resourceId  String
+  resource    Resource @relation(fields: [resourceId], references: [id])
+  softwareName String
+  fromVersion String?
+  toVersion   String
+  updateType  UpdateType
+  updateDate  DateTime
+  description String?
+  status      UpdateStatus
+  createdAt   DateTime @default(now())
+}
+
+model ApprovalWorkflow {
+  id          String         @id @default(uuid())
+  type        WorkflowType
+  requesterId String
+  requester   Employee       @relation("RequesterWorkflows", fields: [requesterId], references: [id])
+  approverId  String?
+  approver    Employee?      @relation("ApproverWorkflows", fields: [approverId], references: [id])
+  status      ApprovalStatus
+  data        Json
+  comments    String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  
+  // Relations to different entities
+  policyId    String?
+  policy      Policy?        @relation(fields: [policyId], references: [id])
+  documentId  String?
+  document    Document?      @relation(fields: [documentId], references: [id])
+  resourceId  String?
+  resource    Resource?      @relation(fields: [resourceId], references: [id])
+  
+  timelineActivities ActivityTimeline[]
+}
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  entityType   EntityType
+  entityId     String
+  changedById  String
+  changedBy    Employee @relation("EmployeeAudit", fields: [changedById], references: [id])
+  fieldChanged String
+  oldValue     String?
+  newValue     String?
+  timestamp    DateTime @default(now())
+}
+
+model ActivityTimeline {
+  id          String       @id @default(uuid())
+  entityType  EntityType
+  entityId    String
+  activityType ActivityType
+  title       String       // Brief description of the activity
+  description String?      // Detailed description
+  metadata    Json?        // Additional data (old/new values, etc.)
+  performedBy String
+  performer   Employee     @relation("EmployeeActivities", fields: [performedBy], references: [id])
+  timestamp   DateTime     @default(now())
+  
+  // Optional relations to specific entities for easier querying
+  policyId    String?
+  policy      Policy?      @relation(fields: [policyId], references: [id])
+  documentId  String?
+  document    Document?    @relation(fields: [documentId], references: [id])
+  resourceId  String?
+  resource    Resource?    @relation(fields: [resourceId], references: [id])
+  workflowId  String?
+  workflow    ApprovalWorkflow? @relation(fields: [workflowId], references: [id])
+  employeeId  String?
+  employee    Employee?    @relation("EmployeeTimelineActivities", fields: [employeeId], references: [id])
+}
+
+enum Role {
+  // Executive Roles
+  CEO
+  CTO
+  CFO
+  COO
+  
+  // Management Roles
+  ENGINEERING_MANAGER
+  PRODUCT_MANAGER
+  SALES_MANAGER
+  HR_MANAGER
+  MARKETING_MANAGER
+  
+  // Development Roles
+  FRONTEND_DEVELOPER
+  BACKEND_DEVELOPER
+  FULLSTACK_DEVELOPER
+  MOBILE_DEVELOPER
+  DEVOPS_ENGINEER
+  QA_ENGINEER
+  
+  // Other Technical Roles
+  DATA_SCIENTIST
+  UI_UX_DESIGNER
+  SYSTEM_ADMINISTRATOR
+  SECURITY_ENGINEER
+  
+  // Business Roles
+  SALES_REPRESENTATIVE
+  BUSINESS_ANALYST
+  MARKETING_SPECIALIST
+  HR_SPECIALIST
+  ACCOUNTANT
+  
+  // Entry Level
+  INTERN
+  JUNIOR_DEVELOPER
+  TRAINEE
+  
+  // General
+  ADMIN
+  EMPLOYEE
+}
+
+enum Status {
+  ACTIVE
+  INACTIVE
+  RESIGNED
+  ON_LEAVE
+  ASSIGNED
+  REVOKED
+  EXPIRED
+}
+
+enum ResourceType {
+  PHYSICAL
+  SOFTWARE
+  CLOUD
+}
+
+enum AccessStatus {
+  REQUESTED
+  APPROVED
+  GRANTED
+  REVOKED
+}
+
+enum AccessPermissionLevel {
+  READ
+  WRITE
+  EDIT
+  ADMIN
+}
+
+enum PolicyCategory {
+  HR
+  IT
+  SECURITY
+  COMPLIANCE
+}
+
+enum PolicyStatus {
+  DRAFT
+  IN_PROGRESS
+  REVIEW
+  APPROVED
+  REJECTED
+  PUBLISHED
+}
+
+enum DocumentCategory {
+  POLICY
+  PROCEDURE
+  GUIDELINE
+  TEMPLATE
+  MANUAL
+}
+
+enum DocumentStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  PUBLISHED
+  ARCHIVED
+}
+
+
+
+enum MaintenanceType {
+  ROUTINE
+  REPAIR
+  UPGRADE
+  INSPECTION
+  CLEANING
+  SOFTWARE_UPDATE
+  SECURITY_PATCH
+}
+
+enum UpdateType {
+  SECURITY_UPDATE
+  FEATURE_UPDATE
+  BUG_FIX
+  MAJOR_VERSION
+  MINOR_VERSION
+  PATCH
+}
+
+enum UpdateStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  ROLLBACK
+}
+
+enum WorkflowType {
+  // IT & Equipment Requests
+  IT_EQUIPMENT_REQUEST
+  SOFTWARE_LICENSE_REQUEST
+  CLOUD_SERVICE_REQUEST
+  
+  // Access & Permissions
+  ACCESS_REQUEST
+  ELEVATED_ACCESS_REQUEST
+  SYSTEM_ADMIN_REQUEST
+  
+  // Policy & Compliance
+  POLICY_UPDATE_REQUEST
+  PROCEDURE_CHANGE_REQUEST
+  COMPLIANCE_REVIEW_REQUEST
+  
+  // Financial & Budget
+  EXPENSE_APPROVAL_REQUEST
+  BUDGET_REQUEST
+  VENDOR_PAYMENT_REQUEST
+  
+  // HR & Personnel
+  HIRING_REQUEST
+  ROLE_CHANGE_REQUEST
+  TRAINING_REQUEST
+  
+  // Operational
+  VENDOR_CONTRACT_REQUEST
+  FACILITY_REQUEST
+  TRAVEL_REQUEST
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum EntityType {
+  EMPLOYEE
+  RESOURCE
+  ACCESS
+  POLICY
+  DOCUMENT
+  APPROVAL_WORKFLOW
+}
+
+enum ActivityType {
+  // General CRUD operations
+  CREATED
+  UPDATED
+  DELETED
+  DELETION_ATTEMPTED
+  DELETION_FAILED
+  
+  // Status changes
+  STATUS_CHANGED
+  APPROVED
+  REJECTED
+  PUBLISHED
+  ARCHIVED
+  
+  // Access and permissions
+  ACCESS_GRANTED
+  ACCESS_REVOKED
+  PERMISSION_CHANGED
+  
+  // File operations
+  FILE_UPLOADED
+  FILE_UPDATED
+  FILE_DELETED
+  
+  // Policy specific
+  POLICY_REVIEWED
+  POLICY_EXPIRED
+  POLICY_RENEWED
+  
+  // Asset specific
+  ASSET_ASSIGNED
+  ASSET_UNASSIGNED
+  ASSET_MAINTENANCE
+  SOFTWARE_UPDATED
+  
+  // Workflow specific
+  WORKFLOW_STARTED
+  WORKFLOW_COMPLETED
+  WORKFLOW_CANCELLED
+  
+  // Employee specific
+  EMPLOYEE_HIRED
+  EMPLOYEE_PROMOTED
+  EMPLOYEE_RESIGNED
+  EMPLOYEE_LOGIN
+  EMPLOYEE_LOGOUT
+  
+  // Document specific
+  DOCUMENT_REVIEWED
+  DOCUMENT_SIGNED
+  
+  // General
+  COMMENT_ADDED
+  NOTE_ADDED
+}
