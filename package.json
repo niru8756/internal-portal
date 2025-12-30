@@ -8,10 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "bootstrap": "node seed-ceo-bootstrap.js",
-    "setup-first-employee": "node setup-first-employee.js",
-    "create-admin": "node create-admin-user.js",
-    "reset-db": "node reset-database.js",
-    "fresh-start": "node fresh-start.js"
+    "setup-first-employee": "node setup-single-user-resources.js"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",
