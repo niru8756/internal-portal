@@ -54,9 +54,6 @@ export default function ProtectedRoute({ children, requiredRoles, requiresPermis
             <p className="mt-1 text-sm text-gray-500">
               You don't have permission to access this page.
             </p>
-            <p className="mt-1 text-xs text-gray-400">
-              Required roles: {requiredRoles.join(', ')}
-            </p>
             <div className="mt-6">
               <button
                 onClick={() => router.push('/')}
