@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { useAuth } from '@/contexts/AuthContext';
 import ProtectedRoute from '@/components/ProtectedRoute';
 import { useNotification } from '@/components/Notification';
 
@@ -29,7 +28,6 @@ interface Employee {
 export default function AssignResourcesPage() {
   const router = useRouter();
   const params = useParams();
-  const { user } = useAuth();
   const { showNotification, NotificationComponent } = useNotification();
   const employeeId = params.id as string;
 
@@ -72,28 +70,24 @@ export default function AssignResourcesPage() {
   const autoSelectResourcesByDepartment = () => {
     if (!employee) return;
 
-    const autoSelections = getAutoSelectionsByDepartment(employee.department, employee.role);
+    const autoSelectedIds = getAutoSelectionsByDepartment(employee.department, employee.role);
     
-    // Find matching resources and auto-select them
+    // Organize auto-selected resources by type
     const physicalSelections: string[] = [];
     const softwareSelections: string[] = [];
     const cloudSelections: string[] = [];
 
-    autoSelections.forEach(selection => {
-      const matchingResources = resources.filter(resource => 
-        resource.type === selection.type && 
-        resource.name.toLowerCase().includes(selection.namePattern.toLowerCase())
-      );
-
-      matchingResources.forEach(resource => {
-        if (selection.type === 'PHYSICAL') {
+    autoSelectedIds.forEach(resourceId => {
+      const resource = resources.find(r => r.id === resourceId);
+      if (resource) {
+        if (resource.type === 'PHYSICAL') {
           physicalSelections.push(resource.id);
-        } else if (selection.type === 'SOFTWARE') {
+        } else if (resource.type === 'SOFTWARE') {
           softwareSelections.push(resource.id);
-        } else if (selection.type === 'CLOUD') {
+        } else if (resource.type === 'CLOUD') {
           cloudSelections.push(resource.id);
         }
-      });
+      }
     });
 
     // Update selected resources with auto-selections
@@ -118,91 +112,122 @@ export default function AssignResourcesPage() {
         'Resources Auto-Selected', 
         `${totalSelected} resources have been automatically selected based on ${employee.name}'s department (${employee.department}) and role (${employee.role.replace(/_/g, ' ')}). You can modify the selection as needed.`
       );
+    } else {
+      // No resources were auto-selected, show helpful message
+      showNotification(
+        'info', 
+        'No Auto-Selection Available', 
+        `No resources were automatically selected for ${employee.name}. Please manually select appropriate resources from the available options below.`
+      );
     }
   };
 
   const getAutoSelectionsByDepartment = (department: string, role: string) => {
-    const selections: Array<{type: 'PHYSICAL' | 'SOFTWARE' | 'CLOUD', namePattern: string}> = [];
+    // Dynamic auto-selection based on available resources in database
+    // This function now works with actual database resources instead of hard-coded patterns
+    
+    const autoSelections: string[] = [];
+    
+    // Get resources by category preferences for different departments
+    const departmentPreferences = getDepartmentResourcePreferences(department, role);
+    
+    // Find matching resources from available resources
+    departmentPreferences.forEach(preference => {
+      const matchingResources = resources.filter(resource => 
+        resource.type === preference.type && 
+        preference.categories.includes(resource.category) &&
+        resource.status === 'AVAILABLE' // Only auto-select available resources
+      );
+      
+      // Auto-select up to the preferred quantity for each category
+      matchingResources.slice(0, preference.maxQuantity || 1).forEach(resource => {
+        autoSelections.push(resource.id);
+      });
+    });
+    
+    return autoSelections;
+  };
+
+  const getDepartmentResourcePreferences = (department: string, role: string) => {
+    const preferences: Array<{
+      type: 'PHYSICAL' | 'SOFTWARE' | 'CLOUD';
+      categories: string[];
+      maxQuantity?: number;
+    }> = [];
 
     // Common resources for all employees
-    selections.push(
-      { type: 'PHYSICAL', namePattern: 'Wireless Mouse' },
-      { type: 'PHYSICAL', namePattern: 'Laptop Bag' },
-      { type: 'SOFTWARE', namePattern: 'Google Workspace' },
-      { type: 'SOFTWARE', namePattern: 'Slack Pro' },
-      { type: 'CLOUD', namePattern: 'Zoom Pro' }
+    preferences.push(
+      { type: 'PHYSICAL', categories: ['Peripherals', 'Other Hardware'], maxQuantity: 2 },
+      { type: 'SOFTWARE', categories: ['Communication', 'Productivity Suite'], maxQuantity: 2 },
+      { type: 'CLOUD', categories: ['Productivity Cloud', 'Communication'], maxQuantity: 2 }
     );
 
-    // Department-specific selections
+    // Department-specific preferences based on available categories
     switch (department.toLowerCase()) {
       case 'engineering':
       case 'technology':
-        selections.push(
-          { type: 'PHYSICAL', namePattern: 'MacBook Pro' },
-          { type: 'PHYSICAL', namePattern: 'LG UltraWide Monitor' },
-          { type: 'PHYSICAL', namePattern: 'Mechanical Keyboard' },
-          { type: 'SOFTWARE', namePattern: 'JetBrains IntelliJ' },
-          { type: 'SOFTWARE', namePattern: 'GitHub Enterprise' },
-          { type: 'CLOUD', namePattern: 'AWS Development' }
+        preferences.push(
+          { type: 'PHYSICAL', categories: ['Laptop', 'Desktop', 'Monitor'], maxQuantity: 1 },
+          { type: 'PHYSICAL', categories: ['Peripherals'], maxQuantity: 2 },
+          { type: 'SOFTWARE', categories: ['Development IDE', 'Database'], maxQuantity: 2 },
+          { type: 'CLOUD', categories: ['Development Platform', 'Code Repository'], maxQuantity: 2 }
         );
         
         // Role-specific additions for engineering
         if (role.includes('FRONTEND') || role.includes('DESIGNER')) {
-          selections.push({ type: 'SOFTWARE', namePattern: 'Figma Professional' });
+          preferences.push({ type: 'SOFTWARE', categories: ['Design Tool'], maxQuantity: 1 });
         }
         if (role.includes('CREATIVE') || role.includes('DESIGNER')) {
-          selections.push({ type: 'SOFTWARE', namePattern: 'Adobe Creative' });
+          preferences.push({ type: 'SOFTWARE', categories: ['Design Software'], maxQuantity: 1 });
         }
         break;
 
       case 'design':
       case 'creative':
-        selections.push(
-          { type: 'PHYSICAL', namePattern: 'MacBook Pro' },
-          { type: 'PHYSICAL', namePattern: 'LG UltraWide Monitor' },
-          { type: 'SOFTWARE', namePattern: 'Figma Professional' },
-          { type: 'SOFTWARE', namePattern: 'Adobe Creative' }
+        preferences.push(
+          { type: 'PHYSICAL', categories: ['Laptop', 'Desktop', 'Monitor'], maxQuantity: 1 },
+          { type: 'SOFTWARE', categories: ['Design Software', 'Design Tool'], maxQuantity: 2 }
         );
         break;
 
       case 'sales':
       case 'marketing':
-        selections.push(
-          { type: 'PHYSICAL', namePattern: 'Dell XPS' },
-          { type: 'PHYSICAL', namePattern: 'iPhone' },
-          { type: 'SOFTWARE', namePattern: 'Microsoft Office' }
+        preferences.push(
+          { type: 'PHYSICAL', categories: ['Laptop', 'Mobile Device'], maxQuantity: 1 },
+          { type: 'SOFTWARE', categories: ['Productivity Suite'], maxQuantity: 1 },
+          { type: 'CLOUD', categories: ['CRM'], maxQuantity: 1 }
         );
         break;
 
       case 'human resources':
       case 'hr':
-        selections.push(
-          { type: 'PHYSICAL', namePattern: 'Dell XPS' },
-          { type: 'SOFTWARE', namePattern: 'Microsoft Office' }
+        preferences.push(
+          { type: 'PHYSICAL', categories: ['Laptop', 'Desktop'], maxQuantity: 1 },
+          { type: 'SOFTWARE', categories: ['Productivity Suite'], maxQuantity: 1 }
         );
         break;
 
       case 'finance':
       case 'accounting':
-        selections.push(
-          { type: 'PHYSICAL', namePattern: 'Dell XPS' },
-          { type: 'SOFTWARE', namePattern: 'Microsoft Office' }
+        preferences.push(
+          { type: 'PHYSICAL', categories: ['Laptop', 'Desktop'], maxQuantity: 1 },
+          { type: 'SOFTWARE', categories: ['Productivity Suite', 'Database'], maxQuantity: 2 }
         );
         break;
 
       default:
         // General office worker
-        selections.push(
-          { type: 'PHYSICAL', namePattern: 'Dell XPS' },
-          { type: 'SOFTWARE', namePattern: 'Microsoft Office' }
+        preferences.push(
+          { type: 'PHYSICAL', categories: ['Laptop', 'Desktop'], maxQuantity: 1 },
+          { type: 'SOFTWARE', categories: ['Productivity Suite'], maxQuantity: 1 }
         );
         break;
     }
 
-    // Common office furniture for all employees
-    selections.push({ type: 'PHYSICAL', namePattern: 'Herman Miller' });
+    // Office furniture for all employees
+    preferences.push({ type: 'PHYSICAL', categories: ['Furniture'], maxQuantity: 1 });
 
-    return selections;
+    return preferences;
   };
 
   const fetchEmployeeAndResources = async () => {
@@ -309,7 +334,7 @@ export default function AssignResourcesPage() {
         
         if (failureResults.length > 0) {
           message += `\n\nFailed assignments (${failureResults.length}):`;
-          failureResults.forEach((failure, index) => {
+          failureResults.forEach((failure) => {
             if (failure.error) {
               message += `\n• ${failure.error}`;
             }
@@ -445,175 +470,205 @@ export default function AssignResourcesPage() {
           )}
 
           {/* Resource Categories */}
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Physical Resources */}
-            <div className="bg-white rounded-lg shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="p-2 bg-blue-100 rounded-lg">
-                      <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                      </svg>
-                    </div>
-                    <div className="ml-3">
-                      <h3 className="text-lg font-medium text-gray-900">Physical Assets</h3>
-                      <p className="text-sm text-gray-500">Hardware and equipment</p>
-                    </div>
-                  </div>
-                  <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    {getSelectedCount('physical')} selected
-                  </span>
-                </div>
+          {resources.length === 0 ? (
+            // Empty state when no resources exist
+            <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+              <div className="mx-auto w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-6">
+                <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2M4 13h2m13-8V4a1 1 0 00-1-1H7a1 1 0 00-1 1v1m8 0V4.5" />
+                </svg>
               </div>
-              <div className="p-6 max-h-96 overflow-y-auto">
-                <div className="space-y-3">
-                  {getResourcesByType('PHYSICAL').map((resource) => (
-                    <div key={resource.id} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id={`physical-${resource.id}`}
-                        checked={selectedResources.physical.includes(resource.id)}
-                        onChange={() => handleResourceToggle(resource.id, 'physical')}
-                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
-                      />
-                      <label htmlFor={`physical-${resource.id}`} className="ml-3 flex-1 cursor-pointer">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">{resource.name}</div>
-                            <div className="text-xs text-gray-500">{resource.category} • {resource.permissionLevel}</div>
-                            {resource.description && (
-                              <div className="text-xs text-gray-400 mt-1">{resource.description}</div>
-                            )}
-                          </div>
-                          {autoSelectedResources.physical.includes(resource.id) && (
-                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
-                              Auto-selected
-                            </span>
-                          )}
-                        </div>
-                      </label>
-                    </div>
-                  ))}
-                  {getResourcesByType('PHYSICAL').length === 0 && (
-                    <p className="text-sm text-gray-500 text-center py-4">No physical resources available</p>
-                  )}
-                </div>
+              <h3 className="text-xl font-semibold text-gray-900 mb-2">No Resources Available</h3>
+              <p className="text-gray-600 mb-6 max-w-md mx-auto">
+                There are currently no resources in the system to assign to <strong>{employee?.name}</strong>. 
+                Resources need to be created first before they can be assigned to employees.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <button
+                  onClick={() => router.push('/resources')}
+                  className="px-6 py-2 bg-indigo-600 text-white rounded-md text-sm font-medium hover:bg-indigo-700"
+                >
+                  Create Resources
+                </button>
+                <button
+                  onClick={handleSkip}
+                  className="px-6 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Skip for Now
+                </button>
               </div>
             </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Physical Resources */}
+              <div className="bg-white rounded-lg shadow-sm">
+                <div className="p-6 border-b border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="p-2 bg-blue-100 rounded-lg">
+                        <svg className="h-6 w-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-lg font-medium text-gray-900">Physical Assets</h3>
+                        <p className="text-sm text-gray-500">Hardware and equipment</p>
+                      </div>
+                    </div>
+                    <span className="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                      {getSelectedCount('physical')} selected
+                    </span>
+                  </div>
+                </div>
+                <div className="p-6 max-h-96 overflow-y-auto">
+                  <div className="space-y-3">
+                    {getResourcesByType('PHYSICAL').map((resource) => (
+                      <div key={resource.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id={`physical-${resource.id}`}
+                          checked={selectedResources.physical.includes(resource.id)}
+                          onChange={() => handleResourceToggle(resource.id, 'physical')}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor={`physical-${resource.id}`} className="ml-3 flex-1 cursor-pointer">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{resource.name}</div>
+                              <div className="text-xs text-gray-500">{resource.category} • {resource.permissionLevel}</div>
+                              {resource.description && (
+                                <div className="text-xs text-gray-400 mt-1">{resource.description}</div>
+                              )}
+                            </div>
+                            {autoSelectedResources.physical.includes(resource.id) && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-800">
+                                Auto-selected
+                              </span>
+                            )}
+                          </div>
+                        </label>
+                      </div>
+                    ))}
+                    {getResourcesByType('PHYSICAL').length === 0 && (
+                      <p className="text-sm text-gray-500 text-center py-4">No physical resources available</p>
+                    )}
+                  </div>
+                </div>
+              </div>
 
-            {/* Software Resources */}
-            <div className="bg-white rounded-lg shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="p-2 bg-green-100 rounded-lg">
-                      <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
-                      </svg>
+              {/* Software Resources */}
+              <div className="bg-white rounded-lg shadow-sm">
+                <div className="p-6 border-b border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="p-2 bg-green-100 rounded-lg">
+                        <svg className="h-6 w-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-lg font-medium text-gray-900">Software Licenses</h3>
+                        <p className="text-sm text-gray-500">Applications and tools</p>
+                      </div>
                     </div>
-                    <div className="ml-3">
-                      <h3 className="text-lg font-medium text-gray-900">Software Licenses</h3>
-                      <p className="text-sm text-gray-500">Applications and tools</p>
-                    </div>
+                    <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                      {getSelectedCount('software')} selected
+                    </span>
                   </div>
-                  <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    {getSelectedCount('software')} selected
-                  </span>
                 </div>
-              </div>
-              <div className="p-6 max-h-96 overflow-y-auto">
-                <div className="space-y-3">
-                  {getResourcesByType('SOFTWARE').map((resource) => (
-                    <div key={resource.id} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id={`software-${resource.id}`}
-                        checked={selectedResources.software.includes(resource.id)}
-                        onChange={() => handleResourceToggle(resource.id, 'software')}
-                        className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
-                      />
-                      <label htmlFor={`software-${resource.id}`} className="ml-3 flex-1 cursor-pointer">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">{resource.name}</div>
-                            <div className="text-xs text-gray-500">{resource.category} • {resource.permissionLevel}</div>
-                            {resource.description && (
-                              <div className="text-xs text-gray-400 mt-1">{resource.description}</div>
+                <div className="p-6 max-h-96 overflow-y-auto">
+                  <div className="space-y-3">
+                    {getResourcesByType('SOFTWARE').map((resource) => (
+                      <div key={resource.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id={`software-${resource.id}`}
+                          checked={selectedResources.software.includes(resource.id)}
+                          onChange={() => handleResourceToggle(resource.id, 'software')}
+                          className="h-4 w-4 text-green-600 focus:ring-green-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor={`software-${resource.id}`} className="ml-3 flex-1 cursor-pointer">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{resource.name}</div>
+                              <div className="text-xs text-gray-500">{resource.category} • {resource.permissionLevel}</div>
+                              {resource.description && (
+                                <div className="text-xs text-gray-400 mt-1">{resource.description}</div>
+                              )}
+                            </div>
+                            {autoSelectedResources.software.includes(resource.id) && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
+                                Auto-selected
+                              </span>
                             )}
                           </div>
-                          {autoSelectedResources.software.includes(resource.id) && (
-                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-green-100 text-green-800">
-                              Auto-selected
-                            </span>
-                          )}
-                        </div>
-                      </label>
-                    </div>
-                  ))}
-                  {getResourcesByType('SOFTWARE').length === 0 && (
-                    <p className="text-sm text-gray-500 text-center py-4">No software resources available</p>
-                  )}
+                        </label>
+                      </div>
+                    ))}
+                    {getResourcesByType('SOFTWARE').length === 0 && (
+                      <p className="text-sm text-gray-500 text-center py-4">No software resources available</p>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
 
-            {/* Cloud Resources */}
-            <div className="bg-white rounded-lg shadow-sm">
-              <div className="p-6 border-b border-gray-200">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center">
-                    <div className="p-2 bg-purple-100 rounded-lg">
-                      <svg className="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
-                      </svg>
+              {/* Cloud Resources */}
+              <div className="bg-white rounded-lg shadow-sm">
+                <div className="p-6 border-b border-gray-200">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center">
+                      <div className="p-2 bg-purple-100 rounded-lg">
+                        <svg className="h-6 w-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                        </svg>
+                      </div>
+                      <div className="ml-3">
+                        <h3 className="text-lg font-medium text-gray-900">Cloud Services</h3>
+                        <p className="text-sm text-gray-500">Online platforms and services</p>
+                      </div>
                     </div>
-                    <div className="ml-3">
-                      <h3 className="text-lg font-medium text-gray-900">Cloud Services</h3>
-                      <p className="text-sm text-gray-500">Online platforms and services</p>
-                    </div>
+                    <span className="bg-purple-100 text-purple-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
+                      {getSelectedCount('cloud')} selected
+                    </span>
                   </div>
-                  <span className="bg-purple-100 text-purple-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
-                    {getSelectedCount('cloud')} selected
-                  </span>
                 </div>
-              </div>
-              <div className="p-6 max-h-96 overflow-y-auto">
-                <div className="space-y-3">
-                  {getResourcesByType('CLOUD').map((resource) => (
-                    <div key={resource.id} className="flex items-center">
-                      <input
-                        type="checkbox"
-                        id={`cloud-${resource.id}`}
-                        checked={selectedResources.cloud.includes(resource.id)}
-                        onChange={() => handleResourceToggle(resource.id, 'cloud')}
-                        className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
-                      />
-                      <label htmlFor={`cloud-${resource.id}`} className="ml-3 flex-1 cursor-pointer">
-                        <div className="flex items-center justify-between">
-                          <div className="flex-1">
-                            <div className="text-sm font-medium text-gray-900">{resource.name}</div>
-                            <div className="text-xs text-gray-500">{resource.category} • {resource.permissionLevel}</div>
-                            {resource.description && (
-                              <div className="text-xs text-gray-400 mt-1">{resource.description}</div>
+                <div className="p-6 max-h-96 overflow-y-auto">
+                  <div className="space-y-3">
+                    {getResourcesByType('CLOUD').map((resource) => (
+                      <div key={resource.id} className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id={`cloud-${resource.id}`}
+                          checked={selectedResources.cloud.includes(resource.id)}
+                          onChange={() => handleResourceToggle(resource.id, 'cloud')}
+                          className="h-4 w-4 text-purple-600 focus:ring-purple-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor={`cloud-${resource.id}`} className="ml-3 flex-1 cursor-pointer">
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-gray-900">{resource.name}</div>
+                              <div className="text-xs text-gray-500">{resource.category} • {resource.permissionLevel}</div>
+                              {resource.description && (
+                                <div className="text-xs text-gray-400 mt-1">{resource.description}</div>
+                              )}
+                            </div>
+                            {autoSelectedResources.cloud.includes(resource.id) && (
+                              <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
+                                Auto-selected
+                              </span>
                             )}
                           </div>
-                          {autoSelectedResources.cloud.includes(resource.id) && (
-                            <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800">
-                              Auto-selected
-                            </span>
-                          )}
-                        </div>
-                      </label>
-                    </div>
-                  ))}
-                  {getResourcesByType('CLOUD').length === 0 && (
-                    <p className="text-sm text-gray-500 text-center py-4">No cloud resources available</p>
-                  )}
+                        </label>
+                      </div>
+                    ))}
+                    {getResourcesByType('CLOUD').length === 0 && (
+                      <p className="text-sm text-gray-500 text-center py-4">No cloud resources available</p>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
+          )}
 
           {/* Summary */}
           {(getSelectedCount('physical') + getSelectedCount('software') + getSelectedCount('cloud')) > 0 && (

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { authenticateUser, generateToken } from '@/lib/auth';
 import { logTimelineActivity } from '@/lib/timeline';
 import { checkEmployeeOnboardingStatus, assignOnboardingResources } from '@/lib/onboardingResources';
-import { getSystemUserId } from '@/lib/systemUser';
 
 export async function POST(request: NextRequest) {
   try {
@@ -54,13 +53,19 @@ export async function POST(request: NextRequest) {
       if (!onboardingStatus.completed) {
         console.log(`User ${user.name} missing onboarding resources, assigning automatically...`);
         
-        const systemUserId = await getSystemUserId();
+        const ceoUser = await prisma.employee.findFirst({
+          where: { role: 'CEO' },
+          select: { id: true }
+        });
+        
+        const performedBy = ceoUser?.id || user.id; // Fallback to user themselves if CEO not found
+        
         const onboardingResults = await assignOnboardingResources(
           user.id,
           user.name,
           user.role,
           user.department,
-          systemUserId
+          performedBy
         );
 
         onboardingInfo = {

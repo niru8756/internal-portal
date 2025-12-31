@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Timeline from '@/components/Timeline';
 import Pagination from '@/components/Pagination';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import ElegantSelect from '@/components/ElegantSelect';
 
 export default function TimelinePage() {
@@ -35,7 +36,8 @@ export default function TimelinePage() {
   ];
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ProtectedRoute>
+      <div className="min-h-screen bg-gray-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <div className="sm:flex sm:items-center sm:justify-between">
           <div className="sm:flex-auto">
@@ -242,6 +244,6 @@ export default function TimelinePage() {
           </div>
         </div> */}
       </div>
-    </div>
+    </ProtectedRoute>
   );
 }

@@ -136,30 +136,6 @@ export default function AccessRequestForm({ onSubmit, onCancel }: AccessRequestF
     resource.type === 'PHYSICAL'
   );
 
-  const hardwareOptions = hardwareResources.length > 0 
-    ? hardwareResources.map(resource => ({
-        name: resource.name,
-        description: resource.description,
-        category: resource.category
-      }))
-    : [
-        { name: 'Laptop (MacBook Pro)', description: 'High-performance laptop for development', category: 'Computing' },
-        { name: 'Laptop (Dell XPS)', description: 'Business laptop for general use', category: 'Computing' },
-        { name: 'Desktop Computer', description: 'Workstation for office use', category: 'Computing' },
-        { name: 'External Monitor', description: 'Additional display for productivity', category: 'Display' },
-        { name: 'Wireless Mouse', description: 'Ergonomic wireless mouse', category: 'Peripherals' },
-        { name: 'Wireless Keyboard', description: 'Wireless keyboard for productivity', category: 'Peripherals' },
-        { name: 'Webcam', description: 'HD webcam for video calls', category: 'Communication' },
-        { name: 'Headset', description: 'Professional headset for calls', category: 'Communication' },
-        { name: 'iPad/Tablet', description: 'Tablet for mobile productivity', category: 'Mobile' },
-        { name: 'iPhone/Mobile Device', description: 'Company mobile device', category: 'Mobile' },
-        { name: 'Docking Station', description: 'Laptop docking station', category: 'Connectivity' },
-        { name: 'USB Hub', description: 'Multi-port USB hub', category: 'Connectivity' },
-        { name: 'External Hard Drive', description: 'External storage device', category: 'Storage' },
-        { name: 'Printer Access', description: 'Access to office printer', category: 'Office Equipment' },
-        { name: 'Other (specify in justification)', description: 'Custom hardware request', category: 'Other' }
-      ];
-
   const selectedResource = accessibleResources.find(res => res.id === formData.resourceId);
 
   const permissionDescriptions = {
@@ -359,7 +335,7 @@ export default function AccessRequestForm({ onSubmit, onCancel }: AccessRequestF
                           <svg className="h-3 w-3 mr-1" fill="currentColor" viewBox="0 0 20 20">
                             <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                           </svg>
-                          {resourcesLoading ? 'Loading...' : `${hardwareOptions.length} hardware options available`}
+                          {resourcesLoading ? 'Loading...' : `${hardwareResources.length} hardware resources available`}
                         </span>
                       </div>
                     </div>
@@ -415,14 +391,19 @@ export default function AccessRequestForm({ onSubmit, onCancel }: AccessRequestF
                   ))}
                 </select>
                 {!resourcesLoading && accessibleResources.length === 0 && (
-                  <div className="mt-3 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                    <div className="flex items-center">
-                      <svg className="h-5 w-5 text-yellow-400 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                  <div className="mt-3 p-4 bg-amber-50 border border-amber-200 rounded-lg">
+                    <div className="flex items-start">
+                      <svg className="h-5 w-5 text-amber-500 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
                         <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
                       </svg>
-                      <p className="text-sm text-yellow-800">
-                        No software or cloud services available for access requests
-                      </p>
+                      <div>
+                        <p className="text-sm font-medium text-amber-800 mb-1">
+                          No software or cloud services available
+                        </p>
+                        <p className="text-sm text-amber-700">
+                          Resources need to be created first. Contact your administrator to add software licenses and cloud services to the system.
+                        </p>
+                      </div>
                     </div>
                   </div>
                 )}
@@ -474,9 +455,9 @@ export default function AccessRequestForm({ onSubmit, onCancel }: AccessRequestF
                   className="block w-full border border-gray-300 rounded-lg px-4 py-3 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500 transition-colors disabled:bg-gray-100 disabled:cursor-not-allowed"
                 >
                   <option value="">
-                    {resourcesLoading ? 'Loading hardware...' : 'Choose hardware...'}
+                    {resourcesLoading ? 'Loading hardware...' : hardwareResources.length > 0 ? 'Choose hardware...' : 'No hardware resources available'}
                   </option>
-                  {!resourcesLoading && hardwareOptions.map((hardware, index) => (
+                  {!resourcesLoading && hardwareResources.map((hardware, index) => (
                     <option key={`${hardware.name}-${index}`} value={hardware.name}>
                       {hardware.name}
                       {hardware.category && ` (${hardware.category})`}
@@ -496,7 +477,7 @@ export default function AccessRequestForm({ onSubmit, onCancel }: AccessRequestF
                           <p className="text-sm text-orange-800">
                             {hardwareResources.length > 0 
                               ? `${hardwareResources.length} hardware items available in inventory.`
-                              : 'Using standard hardware options. Specific items will be assigned based on availability.'
+                              : 'No physical resources found in inventory. Using standard hardware request options - specific items will be assigned based on availability and approval.'
                             }
                           </p>
                           {formData.hardwareRequest === 'Other (specify in justification)' && (
@@ -608,36 +589,6 @@ ${requestType === 'hardware' && formData.hardwareRequest ? `- Why you need ${for
 - Business justification...`}
               />
               
-              {/* Request Summary */}
-              <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-                <h6 className="text-sm font-semibold text-gray-900 mb-2">Request Summary:</h6>
-                <div className="space-y-1 text-sm text-gray-700">
-                  {requestType === 'software' && formData.resourceId && formData.permissionLevel && (
-                    <div className="flex items-center">
-                      <svg className="h-4 w-4 text-blue-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      Requesting <span className="font-semibold">{formData.permissionLevel}</span> access to <span className="font-semibold">{selectedResource?.name}</span>
-                    </div>
-                  )}
-                  {requestType === 'hardware' && formData.hardwareRequest && (
-                    <div className="flex items-center">
-                      <svg className="h-4 w-4 text-orange-500 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                      Requesting hardware: <span className="font-semibold">{formData.hardwareRequest}</span>
-                    </div>
-                  )}
-                  {!requestType && (
-                    <div className="flex items-center text-gray-500">
-                      <svg className="h-4 w-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                      </svg>
-                      Please select a request type above to continue
-                    </div>
-                  )}
-                </div>
-              </div>
             </div>
           </form>
         </div>

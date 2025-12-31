@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
 import { logCreatedActivity, logTimelineActivity } from '@/lib/timeline';
-import { getSystemUserId } from '@/lib/systemUser';
 
 export async function GET(request: NextRequest) {
   try {
@@ -164,9 +163,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Workflow ID is required' }, { status: 400 });
     }
 
-    // Use system user for deletion operations
-    const systemUserId = await getSystemUserId();
-    const deletedBy = deletedByParam === 'system' ? systemUserId : (deletedByParam || systemUserId);
+    // Get CEO user for deletion operations
+    const ceoUser = await prisma.employee.findFirst({
+      where: { role: 'CEO' },
+      select: { id: true }
+    });
+    
+    if (!ceoUser) {
+      return NextResponse.json({ error: 'CEO user not found' }, { status: 500 });
+    }
+    
+    const deletedBy = deletedByParam === 'system' ? ceoUser.id : (deletedByParam || ceoUser.id);
 
     // Get workflow details before deletion for logging
     const workflow = await prisma.approvalWorkflow.findUnique({
@@ -265,11 +272,15 @@ export async function DELETE(request: NextRequest) {
     
     // Log failed deletion attempt
     try {
-      const systemUserId = await getSystemUserId();
+      const ceoUser = await prisma.employee.findFirst({
+        where: { role: 'CEO' },
+        select: { id: true }
+      });
+      
       const { searchParams } = new URL(request.url);
       const id = searchParams.get('id');
       
-      if (id) {
+      if (id && ceoUser) {
         await logTimelineActivity({
           entityType: 'APPROVAL_WORKFLOW',
           entityId: id,
@@ -282,7 +293,7 @@ export async function DELETE(request: NextRequest) {
             attemptedAt: new Date().toISOString(),
             originalWorkflowId: id
           },
-          performedBy: systemUserId
+          performedBy: ceoUser.id
           // Don't set workflowId in case the workflow still exists but deletion failed
         });
       }

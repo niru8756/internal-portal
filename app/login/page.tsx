@@ -192,7 +192,7 @@ export default function LoginPage() {
                 href="/signup" 
                 className="font-semibold text-indigo-600 hover:text-indigo-500 transition-colors duration-200"
               >
-                Create one here
+                Set up your account
               </Link>
             </p>
           </div>

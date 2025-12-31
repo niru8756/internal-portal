@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
 import { logCreatedActivity, logStatusChangedActivity, logTimelineActivity } from '@/lib/timeline';
-import { getSystemUserId } from '@/lib/systemUser';
 import { getUserFromToken } from '@/lib/auth';
 import { createOperationalWorkflow } from '@/lib/workflowService';
 import { trackEntityUpdate } from '@/lib/changeTracker';
@@ -337,9 +336,17 @@ export async function PUT(request: NextRequest) {
     const token = request.cookies.get('auth-token')?.value;
     const currentUser = token ? await getUserFromToken(token) : null;
 
-    // Use system user if no authenticated user (for automated processes)
-    const systemUserId = await getSystemUserId();
-    const finalApproverId = currentUser?.id || approverId || systemUserId;
+    // Use CEO user if no authenticated user (for automated processes)
+    const ceoUser = await prisma.employee.findFirst({
+      where: { role: 'CEO' },
+      select: { id: true }
+    });
+    
+    if (!ceoUser) {
+      return NextResponse.json({ error: 'CEO user not found' }, { status: 404 });
+    }
+    
+    const finalApproverId = currentUser?.id || approverId || ceoUser.id;
 
     // Validate that the approverId exists in the database
     if (finalApproverId) {
@@ -461,9 +468,17 @@ export async function DELETE(request: NextRequest) {
     const token = request.cookies.get('auth-token')?.value;
     const currentUser = token ? await getUserFromToken(token) : null;
     
-    // Use authenticated user if available, otherwise fall back to system user
-    const systemUserId = await getSystemUserId();
-    const deletedBy = currentUser?.id || systemUserId;
+    // Use authenticated user if available, otherwise fall back to CEO
+    const ceoUser = await prisma.employee.findFirst({
+      where: { role: 'CEO' },
+      select: { id: true }
+    });
+    
+    if (!currentUser && !ceoUser) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+    
+    const deletedBy = currentUser?.id || ceoUser?.id;
 
     // Get access request details before deletion for logging
     const accessRequest = await prisma.access.findUnique({
@@ -606,8 +621,13 @@ export async function DELETE(request: NextRequest) {
       // Get the authenticated user for error logging
       const token = request.cookies.get('auth-token')?.value;
       const currentUser = token ? await getUserFromToken(token) : null;
-      const systemUserId = await getSystemUserId();
-      const errorLoggedBy = currentUser?.id || systemUserId;
+      
+      const ceoUser = await prisma.employee.findFirst({
+        where: { role: 'CEO' },
+        select: { id: true }
+      });
+      
+      const errorLoggedBy = currentUser?.id || ceoUser?.id;
       
       if (id) {
         await logTimelineActivity({

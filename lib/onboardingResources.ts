@@ -1,6 +1,7 @@
 // lib/onboardingResources.ts
 import { prisma } from './prisma';
 import { logTimelineActivity } from './timeline';
+import { getCompanyName } from './config/company';
 
 interface OnboardingResourceTemplate {
   name: string;
@@ -12,94 +13,6 @@ interface OnboardingResourceTemplate {
   roleSpecific?: string[]; // Specific roles that get this resource
   departmentSpecific?: string[]; // Specific departments that get this resource
 }
-
-// Standard onboarding resources for all employees
-const STANDARD_ONBOARDING_RESOURCES: OnboardingResourceTemplate[] = [
-  {
-    name: 'Company Laptop',
-    type: 'PHYSICAL',
-    category: 'Hardware',
-    description: 'Standard company laptop for daily work',
-    permissionLevel: 'ADMIN',
-    required: true
-  },
-  {
-    name: 'Office 365 License',
-    type: 'SOFTWARE',
-    category: 'Productivity',
-    description: 'Microsoft Office 365 suite access',
-    permissionLevel: 'WRITE',
-    required: true
-  },
-  {
-    name: 'Company Email Account',
-    type: 'CLOUD',
-    category: 'Communication',
-    description: 'Corporate email account and calendar access',
-    permissionLevel: 'ADMIN',
-    required: true
-  },
-  {
-    name: 'Company Handbook Access',
-    type: 'CLOUD',
-    category: 'Documentation',
-    description: 'Access to company policies and procedures',
-    permissionLevel: 'READ',
-    required: true
-  }
-];
-
-// Role-specific resources
-const ROLE_SPECIFIC_RESOURCES: OnboardingResourceTemplate[] = [
-  {
-    name: 'Development Environment',
-    type: 'SOFTWARE',
-    category: 'Development',
-    description: 'IDE and development tools access',
-    permissionLevel: 'ADMIN',
-    required: true,
-    roleSpecific: ['EMPLOYEE', 'MANAGER'],
-    departmentSpecific: ['Engineering', 'Technology', 'IT']
-  },
-  {
-    name: 'Database Access',
-    type: 'CLOUD',
-    category: 'Database',
-    description: 'Read access to company databases',
-    permissionLevel: 'READ',
-    required: false,
-    roleSpecific: ['EMPLOYEE', 'MANAGER'],
-    departmentSpecific: ['Engineering', 'Technology', 'Data Science']
-  },
-  {
-    name: 'Admin Dashboard',
-    type: 'CLOUD',
-    category: 'Administration',
-    description: 'Administrative dashboard access',
-    permissionLevel: 'ADMIN',
-    required: true,
-    roleSpecific: ['CEO', 'CTO', 'MANAGER']
-  },
-  {
-    name: 'HR Management System',
-    type: 'SOFTWARE',
-    category: 'HR',
-    description: 'Human resources management tools',
-    permissionLevel: 'WRITE',
-    required: true,
-    departmentSpecific: ['Human Resources', 'Executive']
-  },
-  {
-    name: 'Financial Systems',
-    type: 'CLOUD',
-    category: 'Finance',
-    description: 'Access to financial reporting and accounting systems',
-    permissionLevel: 'WRITE',
-    required: true,
-    departmentSpecific: ['Finance', 'Accounting', 'Executive'],
-    roleSpecific: ['CEO', 'CFO', 'MANAGER']
-  }
-];
 
 export async function assignOnboardingResources(
   employeeId: string,
@@ -115,117 +28,96 @@ export async function assignOnboardingResources(
   };
 
   try {
-    // Combine standard and role-specific resources
-    const allResourceTemplates = [
-      ...STANDARD_ONBOARDING_RESOURCES,
-      ...ROLE_SPECIFIC_RESOURCES.filter(resource => 
-        (!resource.roleSpecific || resource.roleSpecific.includes(role)) &&
-        (!resource.departmentSpecific || resource.departmentSpecific.includes(department))
-      )
-    ];
+    // Get available resources from database instead of static templates
+    const availableResources = await prisma.resource.findMany({
+      where: {
+        status: 'ACTIVE'
+      },
+      select: {
+        id: true,
+        name: true,
+        type: true,
+        category: true,
+        description: true,
+        defaultPermission: true
+      }
+    });
 
-    console.log(`Assigning ${allResourceTemplates.length} onboarding resources to ${employeeName}`);
+    if (availableResources.length === 0) {
+      results.errors.push('No resources available for onboarding. Please create resources first.');
+      console.log(`No resources available for onboarding ${employeeName}`);
+      return results;
+    }
 
-    for (const template of allResourceTemplates) {
+    console.log(`Found ${availableResources.length} available resources for onboarding ${employeeName}`);
+
+    // For now, assign basic resources that are commonly needed
+    // This can be made more sophisticated with role-based logic later
+    const basicResourceTypes = ['PHYSICAL', 'SOFTWARE']; // Prioritize physical and software resources
+    const resourcesToAssign = availableResources.filter(resource => 
+      basicResourceTypes.includes(resource.type)
+    ).slice(0, 3); // Limit to first 3 resources to avoid overwhelming new employees
+
+    if (resourcesToAssign.length === 0) {
+      results.errors.push('No suitable resources found for onboarding. Please ensure you have Physical or Software resources available.');
+      return results;
+    }
+
+    for (const resource of resourcesToAssign) {
       try {
-        // Check if a resource with this name already exists
-        let existingResource = await prisma.resource.findFirst({
+        // Check if assignment already exists
+        const existingAssignment = await prisma.resourceAssignment.findFirst({
           where: {
-            name: template.name,
-            type: template.type
+            resourceId: resource.id,
+            employeeId: employeeId,
+            status: 'ACTIVE'
           }
         });
 
-        // If resource doesn't exist, create it
-        if (!existingResource) {
-          // Get CEO for custodian assignment
-          const ceo = await prisma.employee.findFirst({ 
-            where: { role: 'CEO' },
-            select: { id: true }
-          });
-          
-          existingResource = await prisma.resource.create({
+        if (!existingAssignment) {
+          // Create new assignment
+          await prisma.resourceAssignment.create({
             data: {
-              name: template.name,
-              type: template.type,
-              category: template.category,
-              description: template.description,
-              defaultPermission: template.permissionLevel || 'READ',
-              status: 'ACTIVE',
-              owner: 'Unisouk', // Company owns all resources
-              custodianId: ceo?.id || performedBy, // CEO is custodian, fallback to system user
-              totalQuantity: 10 // Default quantity for onboarding resources
-            }
-          });
-
-          results.created++;
-          console.log(`Created new onboarding resource: ${template.name}`);
-        }
-
-        // Assign the resource to the employee using the new assignment system
-        try {
-          // Check if assignment already exists
-          const existingAssignment = await prisma.resourceAssignment.findFirst({
-            where: {
-              resourceId: existingResource.id,
+              resourceId: resource.id,
               employeeId: employeeId,
-              status: 'ACTIVE'
+              quantityAssigned: 1,
+              assignedBy: performedBy,
+              status: 'ACTIVE',
+              notes: `Automatically assigned during onboarding process`
             }
           });
 
-          if (!existingAssignment) {
-            // Create new assignment
-            await prisma.resourceAssignment.create({
-              data: {
-                resourceId: existingResource.id,
-                employeeId: employeeId,
-                quantityAssigned: 1,
-                assignedBy: performedBy,
-                status: 'ACTIVE',
-                notes: `Automatically assigned during onboarding process`
-              }
-            });
-
-            results.assigned++;
-            console.log(`Assigned ${template.name} to ${employeeName} during onboarding`);
-          } else {
-            console.log(`${template.name} already assigned to ${employeeName}`);
-          }
-        } catch (assignmentError) {
-          console.error(`Failed to assign ${template.name} to ${employeeName}:`, assignmentError);
-          results.errors.push(`Failed to assign ${template.name}: ${assignmentError}`);
+          results.assigned++;
+          console.log(`Assigned ${resource.name} to ${employeeName} during onboarding`);
+        } else {
+          console.log(`${resource.name} already assigned to ${employeeName}`);
         }
 
         // Log the assignment
         await logTimelineActivity({
           entityType: 'RESOURCE',
-          entityId: existingResource.id,
+          entityId: resource.id,
           activityType: 'ASSIGNED',
           title: `Onboarding resource assigned to ${employeeName}`,
-          description: `${template.name} (${template.type}) was automatically assigned to ${employeeName} during onboarding`,
+          description: `${resource.name} (${resource.type}) was automatically assigned to ${employeeName} during onboarding`,
           metadata: {
-            resourceName: template.name,
-            resourceType: template.type,
-            resourceCategory: template.category,
+            resourceName: resource.name,
+            resourceType: resource.type,
+            resourceCategory: resource.category,
             employeeName: employeeName,
             employeeId: employeeId,
             assignmentMethod: 'automatic_onboarding',
-            permissionLevel: template.permissionLevel,
-            required: template.required,
-            roleSpecific: template.roleSpecific || null,
-            departmentSpecific: template.departmentSpecific || null
+            permissionLevel: resource.defaultPermission,
+            required: true
           },
           performedBy: performedBy,
-          resourceId: existingResource.id,
+          resourceId: resource.id,
           employeeId: employeeId
         });
 
-        console.log(`Assigned ${template.name} to ${employeeName}`);
-
-      } catch (resourceError) {
-        const errorMessage = `Failed to assign ${template.name}: ${resourceError instanceof Error ? resourceError.message : 'Unknown error'}`;
-        results.errors.push(errorMessage);
-        console.error(errorMessage, resourceError);
+      } catch (assignmentError) {
+        console.error(`Failed to assign ${resource.name} to ${employeeName}:`, assignmentError);
+        results.errors.push(`Failed to assign ${resource.name}: ${assignmentError}`);
       }
     }
 
@@ -235,7 +127,7 @@ export async function assignOnboardingResources(
       entityId: employeeId,
       activityType: 'ONBOARDING_COMPLETED',
       title: `Onboarding resources assigned to ${employeeName}`,
-      description: `Automatic onboarding process completed for ${employeeName}. ${results.assigned} resources assigned, ${results.created} resources created.`,
+      description: `Automatic onboarding process completed for ${employeeName}. ${results.assigned} resources assigned from available inventory.`,
       metadata: {
         employeeName: employeeName,
         role: role,
@@ -243,8 +135,9 @@ export async function assignOnboardingResources(
         resourcesAssigned: results.assigned,
         resourcesCreated: results.created,
         errors: results.errors,
-        onboardingMethod: 'automatic',
-        completedAt: new Date().toISOString()
+        onboardingMethod: 'automatic_from_inventory',
+        completedAt: new Date().toISOString(),
+        availableResourcesCount: availableResources.length
       },
       performedBy: performedBy,
       employeeId: employeeId
@@ -261,14 +154,9 @@ export async function assignOnboardingResources(
   return results;
 }
 
-export async function getOnboardingResourcesForRole(role: string, department: string): Promise<OnboardingResourceTemplate[]> {
-  return [
-    ...STANDARD_ONBOARDING_RESOURCES,
-    ...ROLE_SPECIFIC_RESOURCES.filter(resource => 
-      (!resource.roleSpecific || resource.roleSpecific.includes(role)) &&
-      (!resource.departmentSpecific || resource.departmentSpecific.includes(department))
-    )
-  ];
+export async function getOnboardingResourcesForEmployee(role: string, department: string): Promise<any[]> {
+  // Return empty array since we're now using dynamic resources from database
+  return [];
 }
 
 export async function checkEmployeeOnboardingStatus(employeeId: string): Promise<{
@@ -288,9 +176,6 @@ export async function checkEmployeeOnboardingStatus(employeeId: string): Promise
       throw new Error('Employee not found');
     }
 
-    // Get expected resources for this employee
-    const expectedResources = await getOnboardingResourcesForRole(employee.role, employee.department);
-
     // Get actually assigned resources using the new assignment system
     const assignedResources = await prisma.resourceAssignment.findMany({
       where: {
@@ -304,17 +189,23 @@ export async function checkEmployeeOnboardingStatus(employeeId: string): Promise
       }
     });
 
-    // Check which resources are missing
-    const assignedResourceNames = assignedResources.map(assignment => assignment.resource.name);
-    const missingResources = expectedResources
-      .filter(expected => !assignedResourceNames.includes(expected.name))
-      .map(missing => missing.name);
+    // Get total available resources to determine if onboarding is reasonable
+    const totalAvailableResources = await prisma.resource.count({
+      where: {
+        status: 'ACTIVE'
+      }
+    });
+
+    // Simple heuristic: if employee has at least 1 resource and there are resources available, consider onboarding complete
+    // This can be made more sophisticated later with role-based requirements
+    const hasBasicResources = assignedResources.length > 0;
+    const resourcesAvailable = totalAvailableResources > 0;
 
     return {
-      completed: missingResources.length === 0,
+      completed: hasBasicResources && resourcesAvailable,
       assignedResources: assignedResources.length,
-      expectedResources: expectedResources.length,
-      missingResources
+      expectedResources: Math.min(3, totalAvailableResources), // Expect up to 3 basic resources
+      missingResources: hasBasicResources ? [] : ['Basic resources needed for onboarding']
     };
 
   } catch (error) {
@@ -323,7 +214,7 @@ export async function checkEmployeeOnboardingStatus(employeeId: string): Promise
       completed: false,
       assignedResources: 0,
       expectedResources: 0,
-      missingResources: []
+      missingResources: ['Error checking onboarding status']
     };
   }
 }

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
 import { logStatusChangedActivity, logTimelineActivity } from '@/lib/timeline';
-import { getSystemUserId } from '@/lib/systemUser';
 
 export async function PUT(
   request: NextRequest,
@@ -17,9 +16,17 @@ export async function PUT(
       return NextResponse.json({ error: 'Invalid action' }, { status: 400 });
     }
 
-    // Use system user if no approverId provided or if it's invalid
-    const systemUserId = await getSystemUserId();
-    let finalApproverId = approverId || systemUserId;
+    // Get CEO user as fallback if no approverId provided
+    const ceoUser = await prisma.employee.findFirst({
+      where: { role: 'CEO' },
+      select: { id: true }
+    });
+    
+    if (!ceoUser) {
+      return NextResponse.json({ error: 'CEO user not found' }, { status: 500 });
+    }
+    
+    let finalApproverId = approverId || ceoUser.id;
 
     // Validate that the approverId exists in the database
     if (finalApproverId) {
@@ -29,7 +36,8 @@ export async function PUT(
       });
 
       if (!approverExists) {
-        console.error(`Approver with ID ${finalApproverId} not found, falling back to system user or CEO`);
+        console.error(`Approver with ID ${finalApproverId} not found, falling back to CEO`);
+        finalApproverId = ceoUser.id;
         
         // Try to find a CEO or CTO as fallback approver
         const fallbackApprover = await prisma.employee.findFirst({
@@ -44,9 +52,9 @@ export async function PUT(
           finalApproverId = fallbackApprover.id;
           console.log(`Using fallback approver: ${fallbackApprover.name} (${fallbackApprover.id})`);
         } else {
-          // If no fallback found, use system user
-          finalApproverId = systemUserId;
-          console.log(`Using system user as approver: ${systemUserId}`);
+          // If no fallback found, use CEO
+          finalApproverId = ceoUser.id;
+          console.log(`Using CEO as approver: ${ceoUser.id}`);
         }
       }
     }
@@ -181,11 +189,12 @@ export async function PUT(
               try {
                 const employeeId = accessRequest.employee.id;
                 
-                // Get system user as owner of the new resource
-                const systemUserId = await getSystemUserId();
-                
                 // Get CEO for custodian assignment
                 const ceo = await prisma.employee.findFirst({ where: { role: 'CEO' } });
+                
+                if (!ceo) {
+                  throw new Error('CEO not found for resource custodian assignment');
+                }
                 
                 // Create new physical resource for the hardware request
                 const newResource = await prisma.resource.create({
@@ -195,7 +204,7 @@ export async function PUT(
                     category: 'Hardware',
                     description: `Hardware requested via access request by ${accessRequest.employee.name}`,
                     owner: 'Unisouk', // Company owns all resources
-                    custodianId: ceo?.id || systemUserId, // CEO is custodian, fallback to system user
+                    custodianId: ceo.id, // CEO is custodian
                     totalQuantity: 1,
                     status: 'ACTIVE'
                   }
@@ -207,7 +216,7 @@ export async function PUT(
                     resourceId: newResource.id,
                     employeeId: employeeId,
                     quantityAssigned: 1,
-                    assignedBy: systemUserId,
+                    assignedBy: ceo.id,
                     status: 'ACTIVE',
                     notes: 'Assigned via access request approval'
                   }

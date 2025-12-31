@@ -3,6 +3,8 @@
 import { useState, useEffect } from 'react';
 import { useNotification } from './Notification';
 import ElegantSelect from './ElegantSelect';
+import { getCompanyName } from '@/lib/config/company';
+import { getResourceCategories, getCloudProviders } from '@/lib/config/resources';
 
 interface ResourceFormProps {
   resource?: any;
@@ -17,7 +19,7 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
     type: '',
     category: '',
     description: '',
-    owner: 'Unisouk', // Company owns all resources
+    owner: getCompanyName(), // Company owns all resources
     totalQuantity: 1, // Default quantity
     status: 'ACTIVE',
     defaultPermission: 'READ', // Default permission for software/cloud resources
@@ -184,7 +186,7 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
                 value={formData.modelNumber}
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="e.g., MacBook Pro 16-inch"
+                placeholder="e.g., Business Laptop Pro"
               />
             </div>
 
@@ -370,7 +372,7 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
                 value={formData.provider}
                 onChange={handleChange}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="e.g., Adobe, Microsoft, Slack"
+                placeholder="e.g., Design Suite, Office Suite, Communication Platform"
               />
             </div>
 
@@ -453,40 +455,24 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
               <ElegantSelect
                 options={[
                   { value: '', label: 'Select provider' },
-                  { 
-                    value: 'AWS', 
-                    label: 'Amazon Web Services (AWS)',
-                    icon: (
+                  ...getCloudProviders().map(provider => ({
+                    value: provider.value,
+                    label: provider.label,
+                    description: provider.description,
+                    icon: provider.value === 'AWS' ? (
                       <div className="h-4 w-4 bg-orange-500 rounded flex items-center justify-center">
                         <span className="text-xs font-bold text-white">A</span>
                       </div>
-                    ),
-                    description: 'Amazon cloud services'
-                  },
-                  { 
-                    value: 'Azure', 
-                    label: 'Microsoft Azure',
-                    icon: (
+                    ) : provider.value === 'Azure' ? (
                       <div className="h-4 w-4 bg-blue-500 rounded flex items-center justify-center">
                         <span className="text-xs font-bold text-white">M</span>
                       </div>
-                    ),
-                    description: 'Microsoft cloud platform'
-                  },
-                  { 
-                    value: 'GCP', 
-                    label: 'Google Cloud Platform',
-                    icon: (
+                    ) : provider.value === 'GCP' ? (
                       <div className="h-4 w-4 bg-red-500 rounded flex items-center justify-center">
                         <span className="text-xs font-bold text-white">G</span>
                       </div>
-                    ),
-                    description: 'Google cloud services'
-                  },
-                  { value: 'DigitalOcean', label: 'DigitalOcean', description: 'Simple cloud hosting' },
-                  { value: 'Heroku', label: 'Heroku', description: 'Platform as a service' },
-                  { value: 'Vercel', label: 'Vercel', description: 'Frontend cloud platform' },
-                  { value: 'Other', label: 'Other', description: 'Other cloud provider' }
+                    ) : undefined
+                  }))
                 ]}
                 value={formData.provider}
                 onChange={(value) => setFormData(prev => ({ ...prev, provider: value }))}
@@ -618,9 +604,20 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
       <div className="relative top-10 mx-auto p-5 border w-11/12 max-w-4xl shadow-lg rounded-md bg-white">
         <div className="mt-3">
-          <h3 className="text-lg font-medium text-gray-900 mb-6">
-            {resource ? 'Edit Resource' : 'Add New Resource'}
-          </h3>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-lg font-medium text-gray-900">
+              {resource ? 'Edit Resource' : 'Add New Resource'}
+            </h3>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <svg className="h-6 w-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -638,7 +635,7 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
                   onChange={handleChange}
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                  placeholder="e.g., MacBook Pro, Slack Workspace, AWS EC2"
+                  placeholder="e.g., Business Laptop, Communication Platform, Cloud Instance"
                 />
               </div>
 
@@ -667,17 +664,17 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                         </svg>
                       ),
-                      description: 'Adobe, Office, development tools'
+                      description: 'Design software, office suites, development tools'
                     },
                     { 
                       value: 'CLOUD', 
-                      label: 'Cloud Service (AWS, Azure, SaaS)',
+                      label: 'Cloud Service (Compute, Storage, SaaS)',
                       icon: (
                         <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
                         </svg>
                       ),
-                      description: 'AWS, Azure, Google Cloud, SaaS'
+                      description: 'Cloud platforms, storage, SaaS applications'
                     }
                   ]}
                   value={formData.type}
@@ -729,9 +726,11 @@ export default function ResourceForm({ resource, onSubmit, onCancel }: ResourceF
                     <label className="block text-xs font-medium text-blue-700 mb-1">Owner (Company)</label>
                     <div className="flex items-center space-x-2">
                       <div className="h-6 w-6 bg-blue-600 rounded flex items-center justify-center">
-                        <span className="text-xs font-bold text-white">U</span>
+                        <span className="text-xs font-bold text-white">
+                          {getCompanyName().charAt(0).toUpperCase()}
+                        </span>
                       </div>
-                      <span className="text-sm font-medium text-blue-900">Unisouk</span>
+                      <span className="text-sm font-medium text-blue-900">{getCompanyName()}</span>
                     </div>
                     <p className="text-xs text-blue-600 mt-1">All resources are owned by the company</p>
                   </div>

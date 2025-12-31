@@ -914,7 +914,7 @@ export default function ResourcesPage() {
                     )
                   : (activeFiltersCount > 0
                       ? 'Try adjusting your search terms or filters to find what you\'re looking for.'
-                      : 'Get started by adding your first resource to the system.'
+                      : 'No resources have been created yet. Start by adding resources to your inventory - laptops, software licenses, cloud services, and other assets your team needs.'
                     )
                 }
               </p>
@@ -944,7 +944,7 @@ export default function ResourcesPage() {
                       className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
                     >
                       <Plus className="h-4 w-4" />
-                      Add your first resource
+                      Create your first resource
                     </button>
                   )}
                 </>

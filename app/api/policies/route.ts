@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
 import { logCreatedActivity, logFileUploadedActivity, logTimelineActivity, logUpdatedActivity, logStatusChangedActivity } from '@/lib/timeline';
-import { getSystemUserId } from '@/lib/systemUser';
 import { getUserFromToken } from '@/lib/auth';
 import { createPolicyPublishWorkflow } from '@/lib/workflowService';
 import { trackEntityUpdate } from '@/lib/changeTracker';
@@ -413,8 +412,12 @@ export async function PUT(request: NextRequest) {
         console.log(`Policy "${updatedPolicy.title}" moved to REVIEW status - creating approval workflow`);
         console.log(`Policy has content: ${!!updatedPolicy.content}, has file: ${!!updatedPolicy.filePath}`);
         
-        const systemUserId = await getSystemUserId();
-        const workflowRequesterId = updatedPolicy.ownerId || currentPolicy.ownerId || systemUserId;
+        const ceoUser = await prisma.employee.findFirst({
+          where: { role: 'CEO' },
+          select: { id: true }
+        });
+        
+        const workflowRequesterId = updatedPolicy.ownerId || currentPolicy.ownerId || ceoUser?.id;
         
         const workflow = await createPolicyPublishWorkflow(updatedPolicy.id, workflowRequesterId);
         
@@ -438,8 +441,12 @@ export async function PUT(request: NextRequest) {
 
         console.log(`✅ Policy approval workflow created: ${workflow.id}`);
       } catch (workflowError) {
-        const systemUserId = await getSystemUserId();
-        const workflowRequesterId = updatedPolicy.ownerId || currentPolicy.ownerId || systemUserId;
+        const ceoUser = await prisma.employee.findFirst({
+          where: { role: 'CEO' },
+          select: { id: true }
+        });
+        
+        const workflowRequesterId = updatedPolicy.ownerId || currentPolicy.ownerId || ceoUser?.id;
         
         console.error('❌ Failed to create policy approval workflow:', workflowError);
         console.error('Policy ID:', updatedPolicy.id);

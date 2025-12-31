@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { logAudit } from '@/lib/audit';
 import { logCreatedActivity, logTimelineActivity, logUpdatedActivity } from '@/lib/timeline';
-import { getSystemUserId } from '@/lib/systemUser';
 import { getUserFromToken } from '@/lib/auth';
 import { formatMultipleChanges } from '@/lib/changeFormatter';
 import { trackEntityUpdate } from '@/lib/changeTracker';
@@ -109,8 +108,12 @@ export async function POST(request: NextRequest) {
     // Get the authenticated user for logging
     const token = request.cookies.get('auth-token')?.value;
     const currentUser = token ? await getUserFromToken(token) : null;
-    const systemUserId = await getSystemUserId();
-    const createdBy = currentUser?.id || systemUserId;
+    
+    if (!currentUser) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    const createdBy = currentUser.id;
 
     const employee = await prisma.employee.create({
       data: {
@@ -351,8 +354,17 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'Employee ID is required' }, { status: 400 });
     }
 
-    // Get system user ID for fallback operations
-    const systemUserId = await getSystemUserId();
+    // Get CEO user ID for fallback operations (transfer ownership to CEO)
+    const ceoUser = await prisma.employee.findFirst({
+      where: { role: 'CEO' },
+      select: { id: true }
+    });
+    
+    if (!ceoUser) {
+      return NextResponse.json({ error: 'CEO user not found for ownership transfer' }, { status: 500 });
+    }
+    
+    const fallbackUserId = ceoUser.id;
     
     // Use the authenticated user for logging
     const deletionPerformedBy = currentUser.id;
@@ -412,49 +424,49 @@ export async function DELETE(request: NextRequest) {
       // 1. Update access requests where this employee is the requester
       const accessRequestsAsRequester = await prisma.access.updateMany({
         where: { employeeId: id },
-        data: { employeeId: systemUserId } // Transfer to system user
+        data: { employeeId: fallbackUserId } // Transfer to CEO
       });
       console.log(`Updated ${accessRequestsAsRequester.count} access requests where employee was requester`);
 
       // 2. Update access requests where this employee is the approver
       const accessRequestsAsApprover = await prisma.access.updateMany({
         where: { approverId: id },
-        data: { approverId: systemUserId } // Transfer to system user
+        data: { approverId: fallbackUserId } // Transfer to CEO
       });
       console.log(`Updated ${accessRequestsAsApprover.count} access requests where employee was approver`);
 
       // 3. Update approval workflows where this employee is the requester
       const workflowsAsRequester = await prisma.approvalWorkflow.updateMany({
         where: { requesterId: id },
-        data: { requesterId: systemUserId }
+        data: { requesterId: fallbackUserId }
       });
       console.log(`Updated ${workflowsAsRequester.count} workflows where employee was requester`);
 
       // 4. Update approval workflows where this employee is the approver
       const workflowsAsApprover = await prisma.approvalWorkflow.updateMany({
         where: { approverId: id },
-        data: { approverId: systemUserId }
+        data: { approverId: fallbackUserId }
       });
       console.log(`Updated ${workflowsAsApprover.count} workflows where employee was approver`);
 
       // 5. Update policies owned by this employee
       const policiesUpdated = await prisma.policy.updateMany({
         where: { ownerId: id },
-        data: { ownerId: systemUserId }
+        data: { ownerId: fallbackUserId }
       });
       console.log(`Updated ${policiesUpdated.count} policies owned by employee`);
 
       // 6. Update documents owned by this employee
       const documentsUpdated = await prisma.document.updateMany({
         where: { ownerId: id },
-        data: { ownerId: systemUserId }
+        data: { ownerId: fallbackUserId }
       });
       console.log(`Updated ${documentsUpdated.count} documents owned by employee`);
 
       // 7. Update resources managed by this employee (transfer custodianship)
       const resourcesUpdated = await prisma.resource.updateMany({
         where: { custodianId: id },
-        data: { custodianId: systemUserId }
+        data: { custodianId: fallbackUserId }
       });
       console.log(`Updated ${resourcesUpdated.count} resources managed by employee`);
 
@@ -562,16 +574,16 @@ export async function DELETE(request: NextRequest) {
           // CRITICAL CHANGE: Do NOT delete audit logs and timeline activities
           // Instead, update references to use system user
           await prisma.$transaction(async (tx: any) => {
-            // 1. Update timeline activities to reference system user instead of deleting them
+            // 1. Update timeline activities to reference CEO instead of deleting them
             await tx.activityTimeline.updateMany({
               where: { performedBy: id },
-              data: { performedBy: systemUserId }
+              data: { performedBy: fallbackUserId }
             });
 
-            // 2. Update audit logs to reference system user instead of deleting them
+            // 2. Update audit logs to reference CEO instead of deleting them
             await tx.auditLog.updateMany({
               where: { changedById: id },
-              data: { changedById: systemUserId }
+              data: { changedById: fallbackUserId }
             });
 
             // 3. Update any employees who have this employee as manager (set to null)

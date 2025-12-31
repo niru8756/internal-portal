@@ -47,8 +47,8 @@ export async function formatManagerChange(oldManagerId: string | null, newManage
   const oldManager = oldManagerId ? await getEmployeeInfo(oldManagerId) : null;
   const newManager = newManagerId ? await getEmployeeInfo(newManagerId) : null;
 
-  const oldName = oldManager ? oldManager.name : (oldManagerId === '526f29fe-04c1-44ee-862f-10c18c425333' ? 'System User' : 'Unknown Manager');
-  const newName = newManager ? newManager.name : (newManagerId === '526f29fe-04c1-44ee-862f-10c18c425333' ? 'System User' : 'Unknown Manager');
+  const oldName = oldManager ? oldManager.name : 'Unknown Manager';
+  const newName = newManager ? newManager.name : 'Unknown Manager';
 
   if (!oldManagerId && newManagerId) {
     return `Manager assigned: ${newName}`;

@@ -67,10 +67,6 @@ export function formatValue(value: any, field: string): string {
 
   // Handle manager ID (convert to readable format)
   if (field === 'manager' || field === 'managerId') {
-    if (value === '526f29fe-04c1-44ee-862f-10c18c425333') {
-      return 'System User';
-    }
-    
     // Fallback to shortened ID for now
     // In a real implementation, you'd look up the manager name
     if (typeof value === 'string' && value.length > 10) {

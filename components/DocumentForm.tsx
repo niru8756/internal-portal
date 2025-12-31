@@ -69,9 +69,20 @@ export default function DocumentForm({ onSubmit, onCancel, editingDocument, isEd
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
       <div className="relative top-20 mx-auto p-5 border w-11/12 md:w-3/4 lg:w-2/3 shadow-lg rounded-md bg-white">
         <div className="mt-3">
-          <h3 className="text-lg font-medium text-gray-900 mb-4">
-            {isEditing ? 'Edit Document' : 'Create New Document'}
-          </h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-medium text-gray-900">
+              {isEditing ? 'Edit Document' : 'Create New Document'}
+            </h3>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="p-2 hover:bg-gray-100 rounded-full transition-colors"
+            >
+              <svg className="h-6 w-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>

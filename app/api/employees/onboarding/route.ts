@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getUserFromToken } from '@/lib/auth';
 import { assignOnboardingResources, checkEmployeeOnboardingStatus } from '@/lib/onboardingResources';
-import { getSystemUserId } from '@/lib/systemUser';
 
 export async function GET(request: NextRequest) {
   try {
@@ -80,8 +79,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Assign onboarding resources
-    const systemUserId = await getSystemUserId();
-    const performedBy = currentUser.id || systemUserId;
+    const performedBy = currentUser.id;
 
     console.log(`Assigning onboarding resources to ${targetEmployee.name} (requested by ${currentUser.name})`);
 

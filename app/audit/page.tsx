@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { formatChange, parseChangesFromAuditLog, formatMultipleChanges, formatValue as formatValueFromLib } from '@/lib/changeFormatter';
 import Pagination from '@/components/Pagination';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import { useNotification } from '@/components/Notification';
 import ElegantSelect from '@/components/ElegantSelect';
 
@@ -168,19 +169,22 @@ export default function AuditPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="flex flex-col items-center space-y-4">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-          <div className="text-lg text-gray-600">Loading audit logs...</div>
+      <ProtectedRoute requiredRoles={['CEO', 'CTO', 'HR']}>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="flex flex-col items-center space-y-4">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+            <div className="text-lg text-gray-600">Loading audit logs...</div>
+          </div>
         </div>
-      </div>
+      </ProtectedRoute>
     );
   }
 
   console.log("auditLogs: ", auditLogs);
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <ProtectedRoute requiredRoles={['CEO', 'CTO', 'HR']}>
+      <div className="min-h-screen bg-gray-50">
       {NotificationComponent}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <div className="sm:flex sm:items-center">
@@ -494,6 +498,6 @@ export default function AuditPage() {
           </div>
         )}
       </div>
-    </div>
+    </ProtectedRoute>
   );
 }

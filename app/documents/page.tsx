@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import DocumentForm from '@/components/DocumentForm';
+import ProtectedRoute from '@/components/ProtectedRoute';
 import { DocumentCategory, DocumentStatus } from '@/types';
 
 interface Document {
@@ -175,14 +176,17 @@ export default function DocumentsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading documents...</div>
-      </div>
+      <ProtectedRoute>
+        <div className="min-h-screen flex items-center justify-center">
+          <div className="text-lg">Loading documents...</div>
+        </div>
+      </ProtectedRoute>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <ProtectedRoute>
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
       <div className="sm:flex sm:items-center">
         <div className="sm:flex-auto">
           <h1 className="text-2xl font-semibold text-gray-900">Document Management</h1>
@@ -399,6 +403,6 @@ export default function DocumentsPage() {
           </div>
         </div>
       )}
-    </div>
+    </ProtectedRoute>
   );
 }
