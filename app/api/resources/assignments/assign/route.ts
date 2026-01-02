@@ -1,10 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, AssignmentType } from '@prisma/client';
 import { getUserFromToken } from '@/lib/auth';
+import { 
+  createAssignment, 
+  determineAssignmentType,
+  canAssignHardwareItem,
+  getAvailableLicenseCount
+} from '@/lib/resourceAssignmentService';
 
 const prisma = new PrismaClient();
 
-// POST /api/resources/assignments/assign - Create resource assignment (after approval)
+/**
+ * POST /api/resources/assignments/assign - Create resource assignment (after approval)
+ * 
+ * This endpoint is used for creating assignments after approval workflows.
+ * It supports type-specific assignment models:
+ * - Hardware (PHYSICAL): Requires itemId, exclusive assignment
+ * - Software: Supports INDIVIDUAL or POOLED assignment types
+ * - Cloud: SHARED assignment, multiple users can access
+ * 
+ * Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8
+ */
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('auth-token')?.value;
@@ -24,7 +40,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { employeeId, resourceId, itemId, notes, approvalWorkflowId } = body;
+    const { employeeId, resourceId, itemId, notes, approvalWorkflowId, assignmentType } = body;
 
     // Validate required fields
     if (!employeeId || !resourceId) {
@@ -44,10 +60,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
     }
 
-    // Validate resource exists
+    // Validate resource exists and get type information
     const resource = await prisma.resource.findUnique({
       where: { id: resourceId },
       include: {
+        resourceTypeEntity: true,
         items: {
           where: { status: 'AVAILABLE' },
           orderBy: { createdAt: 'asc' }
@@ -63,160 +80,135 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Resource is not active' }, { status: 400 });
     }
 
-    // For PHYSICAL and SOFTWARE resources, validate item availability
-    let selectedItem = null;
-    if (resource.type === 'PHYSICAL' || resource.type === 'SOFTWARE') {
-      if (itemId) {
-        // Specific item requested
-        selectedItem = await prisma.resourceItem.findFirst({
-          where: {
-            id: itemId,
-            resourceId,
-            status: 'AVAILABLE'
-          }
-        });
-
-        if (!selectedItem) {
-          return NextResponse.json(
-            { error: `Requested ${resource.type === 'SOFTWARE' ? 'license' : 'item'} is not available` },
-            { status: 400 }
-          );
-        }
-      } else {
-        // Auto-select first available item
-        selectedItem = resource.items[0];
-        if (!selectedItem) {
-          return NextResponse.json(
-            { error: `No available ${resource.type === 'SOFTWARE' ? 'licenses' : 'items'} for this resource` },
-            { status: 400 }
-          );
-        }
-      }
-    }
-
-    // Check for existing active assignment
-    const existingAssignment = await prisma.resourceAssignment.findFirst({
-      where: {
-        employeeId,
-        resourceId,
-        status: 'ACTIVE',
-        ...(selectedItem && { itemId: selectedItem.id })
-      }
+    // Check if resource has any items - resources without items cannot be assigned
+    const totalItems = await prisma.resourceItem.count({
+      where: { resourceId }
     });
 
-    if (existingAssignment) {
+    if (totalItems === 0) {
       return NextResponse.json(
-        { error: 'Employee already has an active assignment for this resource' },
+        { error: 'Cannot assign resource: No items have been added to this resource yet. Please add items first.' },
         { status: 400 }
       );
     }
 
-    // Create assignment with transaction
-    const assignment = await prisma.$transaction(async (tx) => {
-      // Create the assignment
-      const newAssignment = await tx.resourceAssignment.create({
-        data: {
-          employeeId,
-          resourceId,
-          itemId: selectedItem?.id,
-          assignedBy: user.id,
-          status: 'ACTIVE',
-          notes
-        },
-        include: {
-          employee: {
-            select: { id: true, name: true, email: true, department: true }
-          },
-          resource: {
-            select: { id: true, name: true, type: true, category: true }
-          },
-          item: {
-            select: { 
-              id: true, 
-              serialNumber: true, 
-              hostname: true,
-              licenseKey: true,
-              softwareVersion: true,
-              licenseType: true
-            }
-          },
-          assignedByUser: {
-            select: { id: true, name: true, email: true }
-          }
-        }
-      });
+    // Determine the appropriate assignment type based on resource type
+    const resourceTypeName = resource.resourceTypeEntity?.name || resource.type;
+    const resolvedAssignmentType = determineAssignmentType(
+      resourceTypeName, 
+      assignmentType as AssignmentType | undefined
+    );
 
-      // Update item status if physical or software resource
-      if (selectedItem) {
-        await tx.resourceItem.update({
-          where: { id: selectedItem.id },
-          data: { status: 'ASSIGNED' }
-        });
+    // For hardware resources, validate or auto-select item
+    let selectedItemId = itemId;
+    const normalizedType = resourceTypeName.toUpperCase();
+    
+    if (normalizedType === 'HARDWARE' || normalizedType === 'PHYSICAL') {
+      if (itemId) {
+        // Validate the specific item can be assigned
+        const canAssign = await canAssignHardwareItem(itemId);
+        if (!canAssign.canAssign) {
+          return NextResponse.json({ error: canAssign.reason }, { status: 400 });
+        }
+      } else {
+        // Auto-select first available item for hardware
+        if (resource.items.length === 0) {
+          return NextResponse.json(
+            { error: 'No available items for this hardware resource' },
+            { status: 400 }
+          );
+        }
+        selectedItemId = resource.items[0].id;
       }
-
-      // Update approval workflow status if provided
-      if (approvalWorkflowId) {
-        await tx.approvalWorkflow.update({
-          where: { id: approvalWorkflowId },
-          data: { 
-            status: 'APPROVED',
-            comments: `Assignment created for ${employee.name}`
-          }
-        });
+    } else if (normalizedType === 'SOFTWARE' && resolvedAssignmentType === 'INDIVIDUAL') {
+      // For individual software assignment, auto-select item if not provided
+      if (!itemId && resource.items.length > 0) {
+        selectedItemId = resource.items[0].id;
       }
+    } else if (normalizedType === 'SOFTWARE' && resolvedAssignmentType === 'POOLED') {
+      // For pooled software, check license availability
+      const licenseInfo = await getAvailableLicenseCount(resourceId);
+      if (licenseInfo.available <= 0) {
+        return NextResponse.json(
+          { error: `No available licenses. ${licenseInfo.used}/${licenseInfo.total} licenses in use.` },
+          { status: 400 }
+        );
+      }
+    }
 
-      // Log audit trail
-      await tx.auditLog.create({
-        data: {
-          entityType: 'RESOURCE',
-          entityId: resourceId,
-          changedById: user.id,
-          fieldChanged: 'assigned',
-          newValue: JSON.stringify({
-            assignmentId: newAssignment.id,
-            employeeId,
-            employeeName: employee.name,
-            itemId: selectedItem?.id,
-            serialNumber: selectedItem?.serialNumber,
-            licenseKey: selectedItem?.licenseKey,
-            softwareVersion: selectedItem?.softwareVersion
-          }),
-          resourceId,
-          assignmentId: newAssignment.id
+    // Create assignment using the service
+    const result = await createAssignment(
+      {
+        resourceId,
+        employeeId,
+        itemId: selectedItemId || undefined,
+        assignmentType: resolvedAssignmentType,
+        notes: notes || `Assigned by ${user.name}`,
+      },
+      user.id
+    );
+
+    if (!result.success) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+
+    // Update approval workflow status if provided
+    if (approvalWorkflowId) {
+      await prisma.approvalWorkflow.update({
+        where: { id: approvalWorkflowId },
+        data: { 
+          status: 'APPROVED',
+          comments: `Assignment created for ${employee.name}`
         }
       });
+    }
 
-      // Log activity timeline
-      await tx.activityTimeline.create({
-        data: {
-          entityType: 'RESOURCE',
-          entityId: resourceId,
-          activityType: 'ASSIGNED',
-          title: `${resource.name} assigned to ${employee.name}`,
-          description: selectedItem 
-            ? `${resource.type === 'SOFTWARE' ? 'License' : 'Hardware item'} ${selectedItem.licenseKey || selectedItem.serialNumber || selectedItem.hostname || selectedItem.id} assigned`
-            : `${resource.type === 'CLOUD' ? 'Cloud' : 'Software'} seat assigned`,
-          performedBy: user.id,
-          resourceId,
-          assignmentId: newAssignment.id,
+    // Log audit trail
+    await prisma.auditLog.create({
+      data: {
+        entityType: 'RESOURCE',
+        entityId: resourceId,
+        changedById: user.id,
+        fieldChanged: 'assigned',
+        newValue: JSON.stringify({
+          assignmentId: result.assignment?.id,
           employeeId,
-          metadata: {
-            assignmentId: newAssignment.id,
-            employeeName: employee.name,
-            employeeDepartment: employee.department,
-            itemDetails: selectedItem ? {
-              serialNumber: selectedItem.serialNumber,
-              hostname: selectedItem.hostname
-            } : null,
-            notes
-          }
-        }
-      });
-
-      return newAssignment;
+          employeeName: employee.name,
+          itemId: selectedItemId,
+          assignmentType: resolvedAssignmentType,
+        }),
+        resourceId,
+        assignmentId: result.assignment?.id
+      }
     });
 
-    return NextResponse.json(assignment, { status: 201 });
+    // Log activity timeline
+    await prisma.activityTimeline.create({
+      data: {
+        entityType: 'RESOURCE',
+        entityId: resourceId,
+        activityType: 'ASSIGNED',
+        title: `${resource.name} assigned to ${employee.name}`,
+        description: getAssignmentDescription(resourceTypeName, resolvedAssignmentType, selectedItemId),
+        performedBy: user.id,
+        resourceId,
+        assignmentId: result.assignment?.id,
+        employeeId,
+        metadata: {
+          assignmentId: result.assignment?.id,
+          employeeName: employee.name,
+          employeeDepartment: employee.department,
+          assignmentType: resolvedAssignmentType,
+          itemId: selectedItemId,
+          notes
+        }
+      }
+    });
+
+    return NextResponse.json({
+      ...result.assignment,
+      assignmentType: resolvedAssignmentType,
+    }, { status: 201 });
 
   } catch (error) {
     console.error('Error creating resource assignment:', error);
@@ -226,5 +218,31 @@ export async function POST(request: NextRequest) {
     );
   } finally {
     await prisma.$disconnect();
+  }
+}
+
+/**
+ * Helper function to generate assignment description based on type
+ */
+function getAssignmentDescription(
+  resourceType: string, 
+  assignmentType: AssignmentType, 
+  itemId?: string
+): string {
+  const normalizedType = resourceType.toUpperCase();
+  
+  switch (normalizedType) {
+    case 'HARDWARE':
+    case 'PHYSICAL':
+      return `Hardware item ${itemId || 'auto-selected'} assigned (exclusive)`;
+    case 'SOFTWARE':
+      if (assignmentType === 'POOLED') {
+        return 'Software license assigned from pool';
+      }
+      return `Software license ${itemId || 'auto-selected'} assigned (individual)`;
+    case 'CLOUD':
+      return 'Cloud resource access granted (shared)';
+    default:
+      return `Resource assigned (${assignmentType.toLowerCase()})`;
   }
 }

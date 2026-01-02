@@ -37,7 +37,38 @@ interface ResourceDetail {
   auditLogs: any[];
   timeline: any[];
   metadata: {}[];
+  propertySchema?: any[];
+  schemaLocked?: boolean;
+  resourceTypeEntity?: {
+    id: string;
+    name: string;
+  } | null;
+  resourceTypeName?: string | null;
+  resourceCategory?: {
+    id: string;
+    name: string;
+  } | null;
+  resourceCategoryName?: string | null;
 }
+
+// Helper function to get display type name
+const getDisplayTypeName = (resource: ResourceDetail | null): string => {
+  if (!resource) return '';
+  return resource.resourceTypeEntity?.name || resource.resourceTypeName || resource.type;
+};
+
+// Helper function to normalize type for comparison
+const normalizeType = (type: string): string => {
+  const typeMap: Record<string, string> = {
+    'Hardware': 'PHYSICAL',
+    'Software': 'SOFTWARE',
+    'Cloud': 'CLOUD',
+    'PHYSICAL': 'PHYSICAL',
+    'SOFTWARE': 'SOFTWARE',
+    'CLOUD': 'CLOUD'
+  };
+  return typeMap[type] || type;
+};
 
 export default function ResourceDetailPage() {
   const router = useRouter();
@@ -58,10 +89,16 @@ export default function ResourceDetailPage() {
   const getAssignmentAvailability = () => {
     if (!resource) return { canAssign: false, reason: 'Resource not loaded' };
     
-    if (resource.type === 'PHYSICAL') {
+    const normalizedType = normalizeType(getDisplayTypeName(resource));
+    
+    if (normalizedType === 'PHYSICAL') {
       if (resource.items.length === 0) {
-        // No items exist - can assign directly
-        return { canAssign: true, reason: 'Direct assignment (no items)' };
+        // No items exist - cannot assign
+        return { 
+          canAssign: false, 
+          reason: 'No hardware items available',
+          details: 'Please add hardware items to this resource before assigning'
+        };
       } else {
         // Items exist - check if any are available
         const availableItems = resource.items.filter(item => item.status === 'AVAILABLE');
@@ -79,10 +116,14 @@ export default function ResourceDetailPage() {
           };
         }
       }
-    } else if (resource.type === 'SOFTWARE') {
+    } else if (normalizedType === 'SOFTWARE') {
       if (resource.items.length === 0) {
-        // No license items exist - can assign directly (like old behavior)
-        return { canAssign: true, reason: 'Direct assignment (no license items)' };
+        // No license items exist - cannot assign
+        return { 
+          canAssign: false, 
+          reason: 'No software licenses available',
+          details: 'Please add license items to this resource before assigning'
+        };
       } else {
         // License items exist - check if any are available
         const availableItems = resource.items.filter(item => item.status === 'AVAILABLE');
@@ -100,9 +141,33 @@ export default function ResourceDetailPage() {
           };
         }
       }
-    } else {
+    } else if (normalizedType === 'CLOUD') {
       // Cloud resources can always be assigned (quantity-based)
       return { canAssign: true, reason: 'Cloud resource (quantity-based)' };
+    } else {
+      // Custom resource types - treat like item-based resources
+      if (resource.items.length === 0) {
+        return { 
+          canAssign: false, 
+          reason: 'No items available',
+          details: 'Please add items to this resource before assigning'
+        };
+      } else {
+        const availableItems = resource.items.filter(item => item.status === 'AVAILABLE');
+        if (availableItems.length === 0) {
+          return { 
+            canAssign: false, 
+            reason: 'No available items',
+            details: `All ${resource.items.length} items are currently assigned or unavailable`
+          };
+        } else {
+          return { 
+            canAssign: true, 
+            reason: 'Items available',
+            availableCount: availableItems.length
+          };
+        }
+      }
     }
   };
 
@@ -177,7 +242,8 @@ export default function ResourceDetailPage() {
   };
 
   const getTypeIcon = (type: string) => {
-    switch (type) {
+    const normalizedType = normalizeType(type);
+    switch (normalizedType) {
       case 'PHYSICAL':
         return (
           <svg className="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -243,7 +309,7 @@ export default function ResourceDetailPage() {
             <div className="flex items-start justify-between">
               <div className="flex items-start space-x-4">
                 <div className="p-3 bg-gray-50 rounded-lg">
-                  {getTypeIcon(resource.type)}
+                  {getTypeIcon(getDisplayTypeName(resource))}
                 </div>
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">{resource.name}</h1>
@@ -306,17 +372,17 @@ export default function ResourceDetailPage() {
                   </>
                 )}
                 
-                {canManageResources && (resource.type === 'PHYSICAL' || resource.type === 'SOFTWARE') && (
+                {canManageResources && normalizeType(getDisplayTypeName(resource)) !== 'CLOUD' && (
                   <button
                     onClick={() => setShowItemForm(true)}
                     className="px-4 py-2 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700"
                   >
-                    {resource.type === 'SOFTWARE' ? 'Add License' : 'Add Item'}
+                    {normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'Add License' : 'Add Item'}
                   </button>
                 )}
                 
                 {/* Delete Button for Cloud Resources */}
-                {canManageResources && resource.type === 'CLOUD' && (
+                {canManageResources && normalizeType(getDisplayTypeName(resource)) === 'CLOUD' && (
                   <button
                     onClick={() => handleDeleteCloudResource()}
                     className="px-4 py-2 text-sm font-medium text-white bg-red-600 rounded-lg hover:bg-red-700"
@@ -329,19 +395,19 @@ export default function ResourceDetailPage() {
           </div>
 
           {/* Assignment Status Banner */}
-          {(resource.type === 'PHYSICAL' || resource.type === 'SOFTWARE') && (
+          {normalizeType(getDisplayTypeName(resource)) !== 'CLOUD' && (
             <div className="mb-6">
               {resource.items.length === 0 ? (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                   <div className="flex items-start space-x-3">
-                    <svg className="w-5 h-5 text-blue-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    <svg className="w-5 h-5 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
                     </svg>
                     <div>
-                      <h4 className="text-sm font-medium text-blue-900">Direct Assignment Available</h4>
-                      <p className="text-sm text-blue-700 mt-1">
-                        This {resource.type.toLowerCase()} resource has no {resource.type === 'SOFTWARE' ? 'license items' : 'hardware items'} yet. It can be assigned directly to employees.
-                        {canManageResources && ` Add ${resource.type === 'SOFTWARE' ? 'license items' : 'hardware items'} below to enable item-specific tracking.`}
+                      <h4 className="text-sm font-medium text-amber-900">No Items Available</h4>
+                      <p className="text-sm text-amber-700 mt-1">
+                        This {getDisplayTypeName(resource).toLowerCase()} resource has no {normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'license items' : 'items'} yet. 
+                        {canManageResources && ` Add ${normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'license items' : 'items'} to enable assignment.`}
                       </p>
                     </div>
                   </div>
@@ -366,15 +432,18 @@ export default function ResourceDetailPage() {
                       <h4 className={`text-sm font-medium ${
                         assignmentAvailability?.canAssign ? 'text-green-900' : 'text-red-900'
                       }`}>
-                        {assignmentAvailability?.canAssign ? 'Hardware Items Available' : 'No Available Hardware Items'}
+                        {assignmentAvailability?.canAssign 
+                          ? (normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'Software Licenses Available' : 'Items Available')
+                          : (normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'No Available Software Licenses' : 'No Available Items')
+                        }
                       </h4>
                       <p className={`text-sm mt-1 ${
                         assignmentAvailability?.canAssign ? 'text-green-700' : 'text-red-700'
                       }`}>
                         {assignmentAvailability?.canAssign ? (
-                          `${assignmentAvailability?.availableCount} of ${resource.items.length} hardware items are available for assignment.`
+                          `${assignmentAvailability?.availableCount} of ${resource.items.length} ${normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'software licenses' : 'items'} are available for assignment.`
                         ) : (
-                          `${assignmentAvailability?.details} To assign this resource, you need to add new hardware items or return existing ones.`
+                          `${assignmentAvailability?.details} To assign this resource, you need to add new ${normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'software licenses' : 'items'} or return existing ones.`
                         )}
                       </p>
                     </div>
@@ -385,7 +454,7 @@ export default function ResourceDetailPage() {
           )}
 
           {/* Cloud Resource Warning Banner */}
-          {resource.type === 'CLOUD' && resource.assignments.length > 0 && canManageResources && (
+          {normalizeType(getDisplayTypeName(resource)) === 'CLOUD' && resource.assignments.length > 0 && canManageResources && (
             <div className="mb-6">
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
                 <div className="flex items-start space-x-3">
@@ -406,18 +475,18 @@ export default function ResourceDetailPage() {
           )}
 
           {/* Availability Stats - Only show for resources with items or Cloud resources */}
-          {((resource.type === 'PHYSICAL') && resource.items.length > 0 ) || resource.type === 'CLOUD'  ? (
+          {(normalizeType(getDisplayTypeName(resource)) !== 'CLOUD' && resource.items.length > 0) || normalizeType(getDisplayTypeName(resource)) === 'CLOUD' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4 mb-6">
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                 <div className="text-2xl font-bold text-gray-900">
-                  {resource.type === 'CLOUD' ? resource.quantity : resource.availability.total}
+                  {normalizeType(getDisplayTypeName(resource)) === 'CLOUD' ? resource.quantity : resource.availability.total}
                 </div>
                 <div className="text-sm text-gray-500">
                   {'Total'}
                 </div>
               </div>
               <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
-                <div className="text-2xl font-bold text-green-600">{resource.type === 'CLOUD' ? ((resource.quantity || 0) - (resource?.assignments?.length || 0)) : resource.availability.available}</div>
+                <div className="text-2xl font-bold text-green-600">{normalizeType(getDisplayTypeName(resource)) === 'CLOUD' ? ((resource.quantity || 0) - (resource?.assignments?.length || 0)) : resource.availability.available}</div>
                 <div className="text-sm text-gray-500">
                   {'Available'}
                 </div>
@@ -428,7 +497,7 @@ export default function ResourceDetailPage() {
                   {'Assigned'}
                 </div>
               </div>
-              {resource.type === 'PHYSICAL' && (
+              {normalizeType(getDisplayTypeName(resource)) !== 'CLOUD' && normalizeType(getDisplayTypeName(resource)) !== 'SOFTWARE' && (
                 <>
                   <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
                     <div className="text-2xl font-bold text-yellow-600">{resource.availability.maintenance}</div>
@@ -462,7 +531,7 @@ export default function ResourceDetailPage() {
                   Overview
                 </button>
                 
-                {(resource.type === 'PHYSICAL' || resource.type === 'SOFTWARE') && (
+                {normalizeType(getDisplayTypeName(resource)) !== 'CLOUD' && (
                   <button
                     onClick={() => setActiveTab('items')}
                     className={`py-4 px-1 border-b-2 font-medium text-sm ${
@@ -471,7 +540,7 @@ export default function ResourceDetailPage() {
                         : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                     }`}
                   >
-                    {resource.type === 'SOFTWARE' ? 'Licenses' : 'Items'} ({resource.items.length})
+                    {normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'Licenses' : 'Items'} ({resource.items.length})
                   </button>
                 )}
                 
@@ -483,7 +552,7 @@ export default function ResourceDetailPage() {
                       : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
                   }`}
                 >
-                  {resource.type === 'SOFTWARE' ? 'Assignments' : resource.type === 'PHYSICAL' ? 'Assignments' : 'Seats'} ({resource.assignments.length})
+                  {normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' ? 'Assignments' : normalizeType(getDisplayTypeName(resource)) === 'PHYSICAL' ? 'Assignments' : 'Seats'} ({resource.assignments.length})
                 </button>
                 
                 <button
@@ -508,11 +577,11 @@ export default function ResourceDetailPage() {
                     <dl className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <dt className="text-sm font-medium text-gray-500">Type</dt>
-                        <dd className="text-sm text-gray-900">{resource.type}</dd>
+                        <dd className="text-sm text-gray-900">{getDisplayTypeName(resource)}</dd>
                       </div>
                       <div>
                         <dt className="text-sm font-medium text-gray-500">Category</dt>
-                        <dd className="text-sm text-gray-900">{resource.category}</dd>
+                        <dd className="text-sm text-gray-900">{resource.resourceCategory?.name || resource.resourceCategoryName || resource.category}</dd>
                       </div>
                       <div>
                         <dt className="text-sm font-medium text-gray-500">Status</dt>
@@ -531,7 +600,7 @@ export default function ResourceDetailPage() {
                       <p className="text-gray-600">{resource.description}</p>
                     </div>
                   )}
-                  {resource?.type === "CLOUD" && <hr/>}
+                  {normalizeType(getDisplayTypeName(resource)) === "CLOUD" && <hr/>}
 
                   {resource?.metadata && (
     <>
@@ -549,9 +618,12 @@ export default function ResourceDetailPage() {
                 </div>
               )}
 
-              {(activeTab === 'items' && (resource.type === 'SOFTWARE' || resource.type === 'PHYSICAL')) && (
+              {activeTab === 'items' && normalizeType(getDisplayTypeName(resource)) !== 'CLOUD' && (
                 <ResourceItemsList
                   resourceId={resource.id}
+                  resourceName={resource.name}
+                  resourceType={resource.type}
+                  propertySchema={resource.propertySchema || []}
                   items={resource.items}
                   onRefresh={fetchResourceDetail}
                   canManage={canManageResources}

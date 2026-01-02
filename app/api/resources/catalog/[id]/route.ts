@@ -28,6 +28,8 @@ export async function GET(
         custodian: {
           select: { id: true, name: true, email: true, department: true }
         },
+        resourceTypeEntity: true,
+        resourceCategory: true,
         items: {
           include: {
             assignments: {
@@ -102,8 +104,20 @@ export async function GET(
       availability.available = 999 - availability.assigned;
     }
 
+    // Ensure propertySchema is properly parsed and returned as an array
+    // The propertySchema field stores the selected properties for this resource
+    const propertySchema = Array.isArray(resource.propertySchema) 
+      ? resource.propertySchema 
+      : (typeof resource.propertySchema === 'string' 
+          ? JSON.parse(resource.propertySchema) 
+          : resource.propertySchema || []);
+
     return NextResponse.json({
       ...resource,
+      propertySchema,
+      schemaLocked: resource.schemaLocked || false,
+      resourceTypeName: resource.resourceTypeEntity?.name || null,
+      resourceCategoryName: resource.resourceCategory?.name || null,
       availability
     });
 
@@ -142,30 +156,61 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const { name, category, description, custodianId, status, quantity, metadata } = body;
+    const { name, category, description, custodianId, status, quantity, metadata, selectedProperties } = body;
 
-    // Get current resource for audit trail
+    // Get current resource for audit trail, including items count
     const currentResource = await prisma.resource.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        items: { select: { id: true } }
+      }
     });
 
     if (!currentResource) {
       return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
     }
 
+    // Check if propertySchema can be updated (only if no items exist)
+    const canUpdateSchema = currentResource.items.length === 0;
+
+    // If user is trying to update property schema but items exist, return an error
+    if (selectedProperties !== undefined && !canUpdateSchema) {
+      // Check if the property schema is actually different
+      const currentSchema = JSON.stringify(currentResource.propertySchema || []);
+      const newSchema = JSON.stringify(selectedProperties);
+      
+      if (currentSchema !== newSchema) {
+        return NextResponse.json(
+          { 
+            error: 'Cannot modify property schema', 
+            details: `This resource has ${currentResource.items.length} item(s). The property schema cannot be modified once items have been added.`
+          }, 
+          { status: 400 }
+        );
+      }
+    }
+
     const updatedResource = await prisma.$transaction(async (tx) => {
+      // Build update data
+      const updateData: any = {
+        ...(name && { name }),
+        ...(category && { category }),
+        ...(description !== undefined && { description }),
+        ...(custodianId && { custodianId }),
+        ...(status && { status }),
+        ...(quantity !== undefined && { quantity }),
+        ...(metadata !== undefined && { metadata })
+      };
+
+      // Allow propertySchema update only if no items exist
+      if (selectedProperties !== undefined && canUpdateSchema) {
+        updateData.propertySchema = selectedProperties;
+      }
+
       // Update resource
       const resource = await tx.resource.update({
         where: { id },
-        data: {
-          ...(name && { name }),
-          ...(category && { category }),
-          ...(description !== undefined && { description }),
-          ...(custodianId && { custodianId }),
-          ...(status && { status }),
-          ...(quantity !== undefined && { quantity }),
-          ...(metadata !== undefined && { metadata })
-        },
+        data: updateData,
         include: {
           custodian: {
             select: { id: true, name: true, email: true, department: true }
@@ -195,6 +240,9 @@ export async function PUT(
       }
       if (metadata !== undefined && JSON.stringify(metadata) !== JSON.stringify(currentResource.metadata)) {
         changes.push({ field: 'metadata', oldValue: JSON.stringify(currentResource.metadata), newValue: JSON.stringify(metadata) });
+      }
+      if (selectedProperties !== undefined && canUpdateSchema && JSON.stringify(selectedProperties) !== JSON.stringify(currentResource.propertySchema)) {
+        changes.push({ field: 'propertySchema', oldValue: JSON.stringify(currentResource.propertySchema), newValue: JSON.stringify(selectedProperties) });
       }
 
       // Create audit logs for each change

@@ -1,9 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { getUserFromToken } from '@/lib/auth';
+import { 
+  createAssignment, 
+  validateAssignmentRequest,
+  determineAssignmentType 
+} from '@/lib/resourceAssignmentService';
+import { AssignmentType } from '@/types/resource-structure';
+import {
+  normalizeAssignment,
+  determineAssignmentTypeFromLegacy
+} from '@/lib/backwardCompatibility';
 
 const prisma = new PrismaClient();
 
+/**
+ * POST /api/resources/assignments - Create a new resource assignment
+ * 
+ * Supports type-specific assignment models:
+ * - Hardware (PHYSICAL): Requires itemId, exclusive assignment
+ * - Software: Supports INDIVIDUAL or POOLED assignment types
+ * - Cloud: SHARED assignment, multiple users can access
+ * 
+ * Requirements: 10.1, 10.2, 10.3, 10.4, 10.5, 10.6, 10.7, 10.8
+ */
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('auth-token')?.value;
@@ -18,7 +38,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { resourceId, employeeId, itemId, notes } = body;
+    const { resourceId, employeeId, itemId, notes, assignmentType } = body;
 
     // Validate required fields
     if (!resourceId || !employeeId) {
@@ -27,68 +47,48 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get resource details
+    // Get resource to determine type-specific assignment model
     const resource = await prisma.resource.findUnique({
       where: { id: resourceId },
       include: {
-        assignments: {
-          where: { status: 'ACTIVE' }
-        }
-      }
+        resourceTypeEntity: true,
+      },
     });
 
     if (!resource) {
       return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
     }
 
-    // Get employee details
-    const employee = await prisma.employee.findUnique({
-      where: { id: employeeId }
-    });
+    // Determine the appropriate assignment type based on resource type
+    const resourceTypeName = resource.resourceTypeEntity?.name || resource.type;
+    const resolvedAssignmentType = determineAssignmentType(
+      resourceTypeName, 
+      assignmentType as AssignmentType | undefined
+    );
 
-    if (!employee) {
-      return NextResponse.json({ error: 'Employee not found' }, { status: 404 });
-    }
-
-    // Check if resource is active
-    if (resource.status !== 'ACTIVE') {
-      return NextResponse.json({ 
-        error: 'Resource is not available for assignment' 
-      }, { status: 400 });
-    }
-
-    // Check if employee already has this resource assigned
-    const existingAssignment = resource.assignments.find(a => a.employeeId === employeeId);
-    if (existingAssignment) {
-      return NextResponse.json({ 
-        error: 'Employee already has this resource assigned' 
-      }, { status: 400 });
-    }
-
-    // Create new assignment
-    const assignment = await prisma.resourceAssignment.create({
-      data: {
+    // Create assignment using the service
+    const result = await createAssignment(
+      {
         resourceId,
         employeeId,
-        ...(itemId && { itemId }),
-        assignedBy: user.id,
-        status: 'ACTIVE',
-        notes: notes || `Assigned by ${user.name}`
-      }
-    });
+        itemId: itemId || undefined,
+        assignmentType: resolvedAssignmentType,
+        notes: notes || `Assigned by ${user.name}`,
+      },
+      user.id
+    );
 
-    // If assigning a physical item, update its status
-    if (itemId) {
-      await prisma.resourceItem.update({
-        where: { id: itemId },
-        data: { status: 'ASSIGNED' }
-      });
+    if (!result.success) {
+      return NextResponse.json({ 
+        error: result.error 
+      }, { status: 400 });
     }
 
     return NextResponse.json({
       success: true,
       message: 'Resource assigned successfully',
-      assignment
+      assignment: result.assignment,
+      assignmentType: resolvedAssignmentType,
     });
 
   } catch (error) {
@@ -101,6 +101,17 @@ export async function POST(request: NextRequest) {
   }
 }
 
+/**
+ * GET /api/resources/assignments - Get resource assignments with filtering
+ * 
+ * Query parameters:
+ * - resourceId: Filter by resource
+ * - employeeId: Filter by employee
+ * - status: Filter by status (ACTIVE, RETURNED, LOST, DAMAGED)
+ * - assignmentType: Filter by type (INDIVIDUAL, POOLED, SHARED)
+ * 
+ * Requirements: 10.4, 10.7
+ */
 export async function GET(request: NextRequest) {
   try {
     const token = request.cookies.get('auth-token')?.value;
@@ -117,28 +128,43 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const resourceId = searchParams.get('resourceId');
     const employeeId = searchParams.get('employeeId');
+    const status = searchParams.get('status');
+    const assignmentType = searchParams.get('assignmentType');
 
     const where: any = {};
     if (resourceId) where.resourceId = resourceId;
     if (employeeId) where.employeeId = employeeId;
+    if (status) where.status = status;
+    if (assignmentType) where.assignmentType = assignmentType;
 
     const assignments = await prisma.resourceAssignment.findMany({
       where,
       include: {
         resource: {
-          select: { id: true, name: true, type: true, category: true }
+          select: { 
+            id: true, 
+            name: true, 
+            type: true, 
+            category: true,
+            resourceTypeEntity: {
+              select: { id: true, name: true }
+            }
+          }
         },
         employee: {
           select: { id: true, name: true, email: true, department: true }
         },
         item: {
-          select: { id: true, serialNumber: true, hostname: true, status: true }
+          select: { id: true, serialNumber: true, hostname: true, status: true, licenseKey: true }
         }
       },
       orderBy: { assignedAt: 'desc' }
     });
 
-    return NextResponse.json({ assignments });
+    return NextResponse.json({ 
+      assignments,
+      total: assignments.length,
+    });
 
   } catch (error) {
     console.error('Error fetching assignments:', error);

@@ -478,7 +478,33 @@ export async function DELETE(request: NextRequest) {
 
     // Handle foreign key dependencies before deletion
     try {
-      
+      // FIRST: Check for active resource assignments before attempting any deletion
+      const activeAssignments = await prisma.resourceAssignment.findMany({
+        where: { 
+          employeeId: id,
+          status: 'ACTIVE'
+        },
+        include: {
+          resource: {
+            select: { name: true }
+          }
+        }
+      });
+
+      // If there are active assignments, return error with details
+      if (activeAssignments.length > 0) {
+        const assignmentDetails = activeAssignments.map(a => a.resource.name).join(', ');
+        return NextResponse.json({
+          error: `Cannot delete employee: They have ${activeAssignments.length} active resource assignment(s)`,
+          details: `Please return or reassign the following resources first: ${assignmentDetails}`,
+          activeAssignments: activeAssignments.map(a => ({
+            id: a.id,
+            resourceName: a.resource.name,
+            assignedAt: a.assignedAt
+          }))
+        }, { status: 400 });
+      }
+
       // 1. Update access requests where this employee is the requester
       const accessRequestsAsRequester = await prisma.access.updateMany({
         where: { employeeId: id },
@@ -525,6 +551,11 @@ export async function DELETE(request: NextRequest) {
       const subordinatesUpdated = await prisma.employee.updateMany({
         where: { managerId: id },
         data: { managerId: null }
+      });
+
+      // 9. Delete all resource assignments (returned/inactive ones) for this employee
+      await prisma.resourceAssignment.deleteMany({
+        where: { employeeId: id }
       });
 
       // Now delete the employee
@@ -618,6 +649,33 @@ export async function DELETE(request: NextRequest) {
       if (deleteError.code === 'P2003') {
         
         try {
+          // First, check for active resource assignments
+          const activeAssignments = await prisma.resourceAssignment.findMany({
+            where: { 
+              employeeId: id,
+              status: 'ACTIVE'
+            },
+            include: {
+              resource: {
+                select: { name: true }
+              }
+            }
+          });
+
+          // If there are active assignments, return error with details
+          if (activeAssignments.length > 0) {
+            const assignmentDetails = activeAssignments.map(a => a.resource.name).join(', ');
+            return NextResponse.json({
+              error: `Cannot delete employee: They have ${activeAssignments.length} active resource assignment(s)`,
+              details: `Please return or reassign the following resources first: ${assignmentDetails}`,
+              activeAssignments: activeAssignments.map(a => ({
+                id: a.id,
+                resourceName: a.resource.name,
+                assignedAt: a.assignedAt
+              }))
+            }, { status: 400 });
+          }
+
           // CRITICAL CHANGE: Do NOT delete audit logs and timeline activities
           // Instead, update references to use system user
           await prisma.$transaction(async (tx: any) => {
@@ -679,6 +737,11 @@ export async function DELETE(request: NextRequest) {
             await tx.document.updateMany({
               where: { ownerId: id },
               data: { ownerId: null }
+            });
+
+            // 10. Delete all resource assignments (both active and returned) for this employee
+            await tx.resourceAssignment.deleteMany({
+              where: { employeeId: id }
             });
 
             // 11. Finally, delete the employee

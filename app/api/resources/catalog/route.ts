@@ -77,6 +77,12 @@ export async function GET(request: NextRequest) {
                 select: { id: true, name: true, email: true, department: true }
               }
             }
+          },
+          resourceTypeEntity: {
+            select: { id: true, name: true }
+          },
+          resourceCategory: {
+            select: { id: true, name: true }
           }
         },
         orderBy: { name: 'asc' }
@@ -137,97 +143,252 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, type, category, description, custodianId, quantity, metadata } = body;
+    const { 
+      name, 
+      type, 
+      category, 
+      description, 
+      custodianId, 
+      quantity, 
+      metadata,
+      // New fields for enhanced resource structure
+      resourceTypeId,
+      resourceCategoryId,
+      selectedProperties
+    } = body;
 
-    // Validate required fields
-    if (!name || !type || !custodianId) {
-      return NextResponse.json(
-        { error: 'Missing required fields: name, type, custodianId' },
-        { status: 400 }
-      );
-    }
+    // Determine if this is a new-style request (with resourceTypeId) or legacy request
+    const isEnhancedRequest = !!resourceTypeId;
 
-    // Validate quantity for Cloud resources
-    if (type === 'CLOUD' && (!quantity || quantity < 1)) {
-      return NextResponse.json(
-        { error: 'Quantity is required for Cloud resources and must be at least 1' },
-        { status: 400 }
-      );
-    }
+    if (isEnhancedRequest) {
+      // Enhanced resource creation with property schema
+      if (!name) {
+        return NextResponse.json({ error: 'Missing required field: name' }, { status: 400 });
+      }
 
-    // Validate custodian exists
-    const custodian = await prisma.employee.findUnique({
-      where: { id: custodianId }
-    });
+      if (!custodianId) {
+        return NextResponse.json({ error: 'Missing required field: custodianId' }, { status: 400 });
+      }
 
-    if (!custodian) {
-      return NextResponse.json({ error: 'Invalid custodian ID' }, { status: 400 });
-    }
-
-    const resource = await prisma.$transaction(async (tx) => {
-      // Create resource
-      const newResource = await tx.resource.create({
-        data: {
-          name,
-          type,
-          category,
-          description,
-          custodianId,
-          status: 'ACTIVE',
-          quantity: type === 'CLOUD' ? quantity : null,
-          metadata: (type === 'SOFTWARE' || type === 'CLOUD') && metadata ? metadata : null
-        },
-        include: {
-          custodian: {
-            select: { id: true, name: true, email: true, department: true }
-          }
-        }
+      // Validate resource type exists
+      const resourceType = await prisma.resourceTypeEntity.findUnique({
+        where: { id: resourceTypeId }
       });
 
-      // Log audit trail
-      await tx.auditLog.create({
-        data: {
-          entityType: 'RESOURCE',
-          entityId: newResource.id,
-          changedById: user.id,
-          fieldChanged: 'created',
-          newValue: JSON.stringify({
+      if (!resourceType) {
+        return NextResponse.json({ error: 'Invalid resource type ID' }, { status: 400 });
+      }
+
+      // Category is mandatory
+      if (!resourceCategoryId) {
+        return NextResponse.json({ error: 'Resource category is required' }, { status: 400 });
+      }
+
+      // Validate category exists and belongs to the selected type
+      const resourceCategory = await prisma.resourceCategoryEntity.findUnique({
+        where: { id: resourceCategoryId }
+      });
+
+      if (!resourceCategory) {
+        return NextResponse.json({ error: 'Invalid resource category ID' }, { status: 400 });
+      }
+
+      if (resourceCategory.resourceTypeId !== resourceTypeId) {
+        return NextResponse.json({ error: 'Category does not belong to the selected resource type' }, { status: 400 });
+      }
+
+      // Validate custodian exists
+      const custodian = await prisma.employee.findUnique({
+        where: { id: custodianId }
+      });
+
+      if (!custodian) {
+        return NextResponse.json({ error: 'Invalid custodian ID' }, { status: 400 });
+      }
+
+      // Validate property schema
+      if (!selectedProperties || selectedProperties.length === 0) {
+        return NextResponse.json({ error: 'At least one property must be selected for the resource' }, { status: 400 });
+      }
+
+      // Map resource type name to legacy type enum
+      const legacyTypeMap: Record<string, 'PHYSICAL' | 'SOFTWARE' | 'CLOUD'> = {
+        'Hardware': 'PHYSICAL',
+        'Software': 'SOFTWARE',
+        'Cloud': 'CLOUD',
+      };
+      const legacyType = legacyTypeMap[resourceType.name] || 'PHYSICAL';
+
+      const resource = await prisma.$transaction(async (tx: any) => {
+        // Create resource with property schema
+        const newResource = await tx.resource.create({
+          data: {
+            name,
+            type: legacyType,
+            category: null, // Legacy field, use resourceCategoryId instead
+            description: description || null,
+            owner: 'Unisouk',
+            custodianId,
+            status: 'ACTIVE',
+            quantity: legacyType === 'CLOUD' ? (quantity || 1) : null,
+            metadata: metadata ? JSON.parse(JSON.stringify(metadata)) : null,
+            resourceTypeId,
+            resourceCategoryId,
+            propertySchema: JSON.parse(JSON.stringify(selectedProperties)),
+            schemaLocked: false
+          },
+          include: {
+            custodian: {
+              select: { id: true, name: true, email: true, department: true }
+            },
+            resourceTypeEntity: true,
+            resourceCategory: true
+          }
+        });
+
+        // Log audit trail
+        await tx.auditLog.create({
+          data: {
+            entityType: 'RESOURCE',
+            entityId: newResource.id,
+            changedById: user.id,
+            fieldChanged: 'created',
+            newValue: JSON.stringify({
+              name,
+              type: legacyType,
+              resourceTypeId,
+              resourceCategoryId,
+              propertySchemaCount: selectedProperties.length
+            }),
+            resourceId: newResource.id
+          }
+        });
+
+        // Log activity timeline
+        await tx.activityTimeline.create({
+          data: {
+            entityType: 'RESOURCE',
+            entityId: newResource.id,
+            activityType: 'CREATED',
+            title: `Resource "${name}" created`,
+            description: `New ${resourceType.name} resource created in ${resourceCategory.name} category with ${selectedProperties.length} properties`,
+            performedBy: user.id,
+            resourceId: newResource.id,
+            metadata: {
+              resourceType: resourceType.name,
+              resourceTypeId,
+              resourceCategoryId,
+              categoryName: resourceCategory.name,
+              custodian: custodian.name,
+              propertyCount: selectedProperties.length,
+              propertyKeys: selectedProperties.map((p: any) => p.key)
+            }
+          }
+        });
+
+        return newResource;
+      });
+
+      return NextResponse.json({
+        ...resource,
+        propertySchema: selectedProperties,
+        resourceTypeName: resourceType.name,
+        resourceCategoryName: resourceCategory.name
+      }, { status: 201 });
+
+    } else {
+      // Legacy resource creation (backward compatibility)
+      if (!name || !type || !custodianId) {
+        return NextResponse.json(
+          { error: 'Missing required fields: name, type, custodianId' },
+          { status: 400 }
+        );
+      }
+
+      // Validate quantity for Cloud resources
+      if (type === 'CLOUD' && (!quantity || quantity < 1)) {
+        return NextResponse.json(
+          { error: 'Quantity is required for Cloud resources and must be at least 1' },
+          { status: 400 }
+        );
+      }
+
+      // Validate custodian exists
+      const custodian = await prisma.employee.findUnique({
+        where: { id: custodianId }
+      });
+
+      if (!custodian) {
+        return NextResponse.json({ error: 'Invalid custodian ID' }, { status: 400 });
+      }
+
+      const resource = await prisma.$transaction(async (tx: any) => {
+        // Create resource
+        const newResource = await tx.resource.create({
+          data: {
             name,
             type,
             category,
             description,
             custodianId,
+            status: 'ACTIVE',
             quantity: type === 'CLOUD' ? quantity : null,
-            metadata: (type === 'SOFTWARE' || type === 'CLOUD') && metadata ? metadata : null
-          }),
-          resourceId: newResource.id
-        }
-      });
-
-      // Log activity timeline
-      await tx.activityTimeline.create({
-        data: {
-          entityType: 'RESOURCE',
-          entityId: newResource.id,
-          activityType: 'CREATED',
-          title: `Resource "${name}" created`,
-          description: `New ${type.toLowerCase()} resource created in ${category || 'general'} category`,
-          performedBy: user.id,
-          resourceId: newResource.id,
-          metadata: {
-            resourceType: type,
-            category,
-            custodian: custodian.name,
-            quantity: type === 'CLOUD' ? quantity : null,
-            hasMetadata: (type === 'SOFTWARE' || type === 'CLOUD') && metadata ? Object.keys(metadata).length : 0
+            metadata: (type === 'SOFTWARE' || type === 'CLOUD') && metadata ? metadata : null,
+            propertySchema: [],
+            schemaLocked: false
+          },
+          include: {
+            custodian: {
+              select: { id: true, name: true, email: true, department: true }
+            }
           }
-        }
+        });
+
+        // Log audit trail
+        await tx.auditLog.create({
+          data: {
+            entityType: 'RESOURCE',
+            entityId: newResource.id,
+            changedById: user.id,
+            fieldChanged: 'created',
+            newValue: JSON.stringify({
+              name,
+              type,
+              category,
+              description,
+              custodianId,
+              quantity: type === 'CLOUD' ? quantity : null,
+              metadata: (type === 'SOFTWARE' || type === 'CLOUD') && metadata ? metadata : null
+            }),
+            resourceId: newResource.id
+          }
+        });
+
+        // Log activity timeline
+        await tx.activityTimeline.create({
+          data: {
+            entityType: 'RESOURCE',
+            entityId: newResource.id,
+            activityType: 'CREATED',
+            title: `Resource "${name}" created`,
+            description: `New ${type.toLowerCase()} resource created in ${category || 'general'} category`,
+            performedBy: user.id,
+            resourceId: newResource.id,
+            metadata: {
+              resourceType: type,
+              category,
+              custodian: custodian.name,
+              quantity: type === 'CLOUD' ? quantity : null,
+              hasMetadata: (type === 'SOFTWARE' || type === 'CLOUD') && metadata ? Object.keys(metadata).length : 0
+            }
+          }
+        });
+
+        return newResource;
       });
 
-      return newResource;
-    });
-
-    return NextResponse.json(resource, { status: 201 });
+      return NextResponse.json(resource, { status: 201 });
+    }
 
   } catch (error) {
     console.error('Error creating resource:', error);

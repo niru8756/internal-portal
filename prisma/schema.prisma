@@ -9,6 +9,66 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// ============================================
+// Resource Structure Enhancement Models
+// ============================================
+
+// Resource Type - replaces the ResourceType enum with a flexible table
+model ResourceTypeEntity {
+  id                  String   @id @default(uuid())
+  name                String   @unique
+  description         String?
+  isSystem            Boolean  @default(false)
+  mandatoryProperties Json     @default("[]")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  categories  ResourceCategoryEntity[]
+  resources   Resource[] @relation("ResourceTypeRelation")
+  properties  PropertyCatalog[] @relation("TypeProperties")
+}
+
+// Resource Category - sub-classification within a type
+model ResourceCategoryEntity {
+  id             String   @id @default(uuid())
+  name           String
+  description    String?
+  resourceTypeId String
+  resourceType   ResourceTypeEntity @relation(fields: [resourceTypeId], references: [id])
+  isSystem       Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  resources      Resource[] @relation("ResourceCategoryRelation")
+
+  @@unique([name, resourceTypeId])
+}
+
+// Property Catalog - predefined and custom properties for resources
+model PropertyCatalog {
+  id             String   @id @default(uuid())
+  key            String   @unique
+  label          String
+  dataType       PropertyDataType
+  description    String?
+  defaultValue   Json?
+  isSystem       Boolean  @default(false)
+  resourceTypeId String?
+  resourceType   ResourceTypeEntity? @relation("TypeProperties", fields: [resourceTypeId], references: [id])
+  createdAt      DateTime @default(now())
+}
+
+enum PropertyDataType {
+  STRING
+  NUMBER
+  BOOLEAN
+  DATE
+}
+
+// ============================================
+// Core Models
+// ============================================
+
 model Employee {
   id          String    @id @default(uuid())
   name        String
@@ -74,6 +134,16 @@ model Resource {
   // Flexible metadata for Software/Cloud specifications
   metadata      Json?
 
+  // New fields for resource structure enhancement
+  resourceTypeId     String?
+  resourceTypeEntity ResourceTypeEntity? @relation("ResourceTypeRelation", fields: [resourceTypeId], references: [id])
+  resourceCategoryId String?
+  resourceCategory   ResourceCategoryEntity? @relation("ResourceCategoryRelation", fields: [resourceCategoryId], references: [id])
+  
+  // Property schema (locked after first item)
+  propertySchema Json   @default("[]")
+  schemaLocked   Boolean @default(false)
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -123,6 +193,9 @@ model ResourceItem {
 
   // Flexible metadata for any additional specifications
   metadata        Json?
+  
+  // Dynamic properties based on resource schema (new field)
+  properties      Json @default("{}")
 
   assignments     ResourceAssignment[]
 
@@ -145,6 +218,9 @@ model ResourceAssignment {
   assignedByUser Employee @relation("AssignmentsMade", fields: [assignedBy], references: [id])
 
   status      AssignmentStatus @default(ACTIVE)
+  
+  // Assignment type for different resource models
+  assignmentType AssignmentType @default(INDIVIDUAL)
 
   assignedAt  DateTime @default(now())
   returnedAt  DateTime?
@@ -402,6 +478,12 @@ enum AssignmentStatus {
   RETURNED
   LOST
   DAMAGED
+}
+
+enum AssignmentType {
+  INDIVIDUAL
+  POOLED
+  SHARED
 }
 
 enum ItemStatus {

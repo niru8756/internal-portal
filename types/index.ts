@@ -1,4 +1,8 @@
 // Core types for Internal Portal
+
+// Re-export all resource structure enhancement types
+export * from './resource-structure';
+
 export interface User {
   id: string;
   name: string;

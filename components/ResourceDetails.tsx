@@ -8,6 +8,24 @@ interface ResourceDetailsProps {
   onClose: () => void;
 }
 
+// Helper function to get display type name
+const getDisplayTypeName = (resource: any): string => {
+  return resource.resourceTypeEntity?.name || resource.resourceTypeName || resource.type;
+};
+
+// Helper function to normalize type for comparison
+const normalizeType = (type: string): string => {
+  const typeMap: Record<string, string> = {
+    'Hardware': 'PHYSICAL',
+    'Software': 'SOFTWARE',
+    'Cloud': 'CLOUD',
+    'PHYSICAL': 'PHYSICAL',
+    'SOFTWARE': 'SOFTWARE',
+    'CLOUD': 'CLOUD'
+  };
+  return typeMap[type] || type;
+};
+
 export default function ResourceDetails({ resource, isOpen, onClose }: ResourceDetailsProps) {
   const [activeTab, setActiveTab] = useState('overview');
 
@@ -74,7 +92,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                     {resource.permissionLevel.toUpperCase()}
                   </span>
                 )}
-                <span className="text-sm text-gray-500">{resource.type} Resource</span>
+                <span className="text-sm text-gray-500">{getDisplayTypeName(resource)} Resource</span>
               </div>
             </div>
           </div>
@@ -148,7 +166,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                   </div>
                   <div className="flex justify-between">
                     <span className="text-sm font-medium text-gray-500">Type:</span>
-                    <span className="text-sm text-gray-900">{resource.type}</span>
+                    <span className="text-sm text-gray-900">{getDisplayTypeName(resource)}</span>
                   </div>
                   {resource.category && (
                     <div className="flex justify-between">
@@ -186,7 +204,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                   )}
                   
                   {/* Single Assignment (Physical devices) */}
-                  {resource.type === 'PHYSICAL' && resource.assignedTo && (
+                  {normalizeType(getDisplayTypeName(resource)) === 'PHYSICAL' && resource.assignedTo && (
                     <>
                       <div className="flex justify-between">
                         <span className="text-sm font-medium text-gray-500">Assigned To:</span>
@@ -204,7 +222,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                   )}
                   
                   {/* Multiple Assignments (Software/Cloud) */}
-                  {(resource.type === 'SOFTWARE' || resource.type === 'CLOUD') && resource.assignedEmployees && resource.assignedEmployees.length > 0 && (
+                  {(normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' || normalizeType(getDisplayTypeName(resource)) === 'CLOUD') && resource.assignedEmployees && resource.assignedEmployees.length > 0 && (
                     <div>
                       <div className="flex justify-between mb-2">
                         <span className="text-sm font-medium text-gray-500">Assigned To:</span>
@@ -222,7 +240,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                   )}
                   
                   {/* Fallback for single assignment on software/cloud (backward compatibility) */}
-                  {(resource.type === 'SOFTWARE' || resource.type === 'CLOUD') && resource.assignedTo && (!resource.assignedEmployees || resource.assignedEmployees.length === 0) && (
+                  {(normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' || normalizeType(getDisplayTypeName(resource)) === 'CLOUD') && resource.assignedTo && (!resource.assignedEmployees || resource.assignedEmployees.length === 0) && (
                     <>
                       <div className="flex justify-between">
                         <span className="text-sm font-medium text-gray-500">Assigned To:</span>
@@ -272,7 +290,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
 
           {activeTab === 'technical' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {resource.type === 'PHYSICAL' && (
+              {normalizeType(getDisplayTypeName(resource)) === 'PHYSICAL' && (
                 <>
                   <div className="bg-gray-50 p-4 rounded-lg">
                     <h3 className="text-lg font-medium text-gray-900 mb-4">Hardware Specifications</h3>
@@ -353,7 +371,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                 </>
               )}
 
-              {resource.type === 'SOFTWARE' && (
+              {normalizeType(getDisplayTypeName(resource)) === 'SOFTWARE' && (
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Software Details</h3>
                   <div className="space-y-3">
@@ -393,7 +411,7 @@ export default function ResourceDetails({ resource, isOpen, onClose }: ResourceD
                 </div>
               )}
 
-              {resource.type === 'CLOUD' && (
+              {normalizeType(getDisplayTypeName(resource)) === 'CLOUD' && (
                 <div className="bg-gray-50 p-4 rounded-lg">
                   <h3 className="text-lg font-medium text-gray-900 mb-4">Cloud Service Details</h3>
                   <div className="space-y-3">

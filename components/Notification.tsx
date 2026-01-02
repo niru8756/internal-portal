@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 interface NotificationProps {
   type: 'success' | 'error' | 'warning' | 'info';
@@ -125,7 +125,7 @@ export function useNotification() {
     isVisible: boolean;
   } | null>(null);
 
-  const showNotification = (
+  const showNotification = useCallback((
     type: 'success' | 'error' | 'warning' | 'info',
     title: string,
     message: string
@@ -136,11 +136,11 @@ export function useNotification() {
       message,
       isVisible: true
     });
-  };
+  }, []);
 
-  const hideNotification = () => {
+  const hideNotification = useCallback(() => {
     setNotification(prev => prev ? { ...prev, isVisible: false } : null);
-  };
+  }, []);
 
   const NotificationComponent = notification ? (
     <Notification

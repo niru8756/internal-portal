@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { PrismaClient } from '@prisma/client';
 import { getUserFromToken } from '@/lib/auth';
-
-const prisma = new PrismaClient();
+import { prisma } from '@/lib/prisma';
+import { 
+  createResourceItem, 
+  getResourceItems,
+  validateMandatoryProperties
+} from '@/lib/resourceItemService';
+import { ItemStatus } from '@/types/resource-structure';
+import {
+  createBackwardCompatibleItemResponse,
+  convertLegacyFieldsToProperties,
+  isNewPropertiesFormat
+} from '@/lib/backwardCompatibility';
 
 // GET /api/resources/items - List resource items (hardware and software)
+// Requirements: 8.8 - Display only properties selected for that resource type
 export async function GET(request: NextRequest) {
   try {
     const token = request.cookies.get('auth-token')?.value;
@@ -22,14 +32,36 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get('page') || '1');
     const limit = parseInt(searchParams.get('limit') || '20');
     const resourceId = searchParams.get('resourceId');
-    const status = searchParams.get('status') as 'AVAILABLE' | 'ASSIGNED' | 'MAINTENANCE' | 'LOST' | 'DAMAGED' | null;
+    const status = searchParams.get('status') as ItemStatus | null;
     const search = searchParams.get('search');
 
+    // If resourceId is provided, use the new service
+    if (resourceId) {
+      const result = await getResourceItems(resourceId, {
+        page,
+        limit,
+        status: status || undefined,
+        search: search || undefined,
+      });
+
+      return NextResponse.json({
+        items: result.items,
+        pagination: {
+          currentPage: page,
+          totalPages: Math.ceil(result.total / limit),
+          totalItems: result.total,
+          itemsPerPage: limit,
+          hasNextPage: page < Math.ceil(result.total / limit),
+          hasPreviousPage: page > 1
+        }
+      });
+    }
+
+    // Fallback to original behavior for listing all items
     const skip = (page - 1) * limit;
 
     // Build where clause
     const where: any = {};
-    if (resourceId) where.resourceId = resourceId;
     if (status) where.status = status;
     if (search) {
       where.OR = [
@@ -48,7 +80,14 @@ export async function GET(request: NextRequest) {
         take: limit,
         include: {
           resource: {
-            select: { id: true, name: true, type: true, category: true }
+            select: { 
+              id: true, 
+              name: true, 
+              type: true, 
+              category: true,
+              propertySchema: true,
+              schemaLocked: true,
+            }
           },
           assignments: {
             where: { status: 'ACTIVE' },
@@ -85,12 +124,11 @@ export async function GET(request: NextRequest) {
       { error: 'Failed to fetch resource items' },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }
 
-// POST /api/resources/items - Create new resource item (hardware and software)
+// POST /api/resources/items - Create new resource item with dynamic properties
+// Requirements: 9.1, 9.2 - Create items as actual instances with property validation
 export async function POST(request: NextRequest) {
   try {
     const token = request.cookies.get('auth-token')?.value;
@@ -110,8 +148,96 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
+    const { resourceId, properties, status } = body;
+
+    // Validate required fields
+    if (!resourceId) {
+      return NextResponse.json(
+        { error: 'Missing required field: resourceId' },
+        { status: 400 }
+      );
+    }
+
+    // Check if using new dynamic properties format or legacy format
+    if (properties) {
+      // New dynamic properties format
+      // Check for duplicate serial number if provided in properties
+      if (properties.serialNumber) {
+        const existingItem = await prisma.resourceItem.findUnique({
+          where: { serialNumber: properties.serialNumber }
+        });
+
+        if (existingItem) {
+          return NextResponse.json(
+            { error: 'Serial number already exists' },
+            { status: 400 }
+          );
+        }
+      }
+
+      // Fetch resource with its type to get mandatory properties
+      // Requirements: 4.2, 4.4 - Validate mandatory properties on item creation
+      const resource = await prisma.resource.findUnique({
+        where: { id: resourceId },
+        include: {
+          resourceTypeEntity: {
+            select: { mandatoryProperties: true, name: true }
+          }
+        }
+      });
+
+      if (!resource) {
+        return NextResponse.json(
+          { error: 'Resource not found' },
+          { status: 404 }
+        );
+      }
+
+      // Validate mandatory properties if the resource has a type with mandatory properties
+      if (resource.resourceTypeEntity) {
+        const mandatoryProperties = (resource.resourceTypeEntity.mandatoryProperties as string[]) || [];
+        
+        if (mandatoryProperties.length > 0) {
+          const validation = validateMandatoryProperties(properties, mandatoryProperties);
+          
+          if (!validation.isValid) {
+            return NextResponse.json(
+              { 
+                error: `Missing required properties: ${validation.missingProperties.join(', ')}`,
+                code: 'MISSING_MANDATORY_PROPERTIES',
+                details: {
+                  missingProperties: validation.missingProperties,
+                  errors: validation.errors
+                }
+              },
+              { status: 400 }
+            );
+          }
+        }
+      }
+
+      try {
+        const item = await createResourceItem(
+          resourceId,
+          { properties, status },
+          user.id
+        );
+        return NextResponse.json(item, { status: 201 });
+      } catch (error: any) {
+        // Handle validation errors
+        if (error.message.includes('Property validation failed') || 
+            error.message.includes('Resource not found')) {
+          return NextResponse.json(
+            { error: error.message },
+            { status: 400 }
+          );
+        }
+        throw error;
+      }
+    }
+
+    // Legacy format support - convert to properties format
     const {
-      resourceId,
       serialNumber,
       hostname,
       ipAddress,
@@ -126,7 +252,6 @@ export async function POST(request: NextRequest) {
       licenseExpiry,
       value,
       metadata,
-      // Software-specific fields
       licenseKey,
       softwareVersion,
       licenseType,
@@ -134,28 +259,18 @@ export async function POST(request: NextRequest) {
       activationCode
     } = body;
 
-    // Validate required fields
-    if (!resourceId) {
-      return NextResponse.json(
-        { error: 'Missing required field: resourceId' },
-        { status: 400 }
-      );
-    }
-
-    // Validate resource exists and is PHYSICAL or SOFTWARE type
+    // Validate resource exists and get its type for mandatory property validation
     const resource = await prisma.resource.findUnique({
-      where: { id: resourceId }
+      where: { id: resourceId },
+      include: {
+        resourceTypeEntity: {
+          select: { mandatoryProperties: true, name: true }
+        }
+      }
     });
 
     if (!resource) {
       return NextResponse.json({ error: 'Resource not found' }, { status: 404 });
-    }
-
-    if (!['PHYSICAL', 'SOFTWARE'].includes(resource.type)) {
-      return NextResponse.json(
-        { error: 'Items can only be created for PHYSICAL and SOFTWARE resources' },
-        { status: 400 }
-      );
     }
 
     // Check for duplicate serial number if provided
@@ -172,20 +287,86 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Build properties object from legacy fields
+    const legacyProperties: Record<string, unknown> = {};
+    if (serialNumber) legacyProperties.serialNumber = serialNumber;
+    if (hostname) legacyProperties.hostname = hostname;
+    if (ipAddress) legacyProperties.ipAddress = ipAddress;
+    if (macAddress) legacyProperties.macAddress = macAddress;
+    if (operatingSystem) legacyProperties.operatingSystem = operatingSystem;
+    if (osVersion) legacyProperties.osVersion = osVersion;
+    if (processor) legacyProperties.processor = processor;
+    if (memory) legacyProperties.memory = memory;
+    if (storage) legacyProperties.storage = storage;
+    if (purchaseDate) legacyProperties.purchaseDate = purchaseDate;
+    if (warrantyExpiry) legacyProperties.warrantyExpiry = warrantyExpiry;
+    if (licenseExpiry) legacyProperties.licenseExpiry = licenseExpiry;
+    if (value) legacyProperties.value = parseFloat(value);
+    if (licenseKey) legacyProperties.licenseKey = licenseKey;
+    if (softwareVersion) legacyProperties.softwareVersion = softwareVersion;
+    if (licenseType) legacyProperties.licenseType = licenseType;
+    if (maxUsers) legacyProperties.maxUsers = maxUsers;
+    if (activationCode) legacyProperties.activationCode = activationCode;
+
+    // Validate mandatory properties for legacy format
+    // Requirements: 4.2, 4.4 - Validate mandatory properties on item creation
+    if (resource.resourceTypeEntity) {
+      const mandatoryProps = (resource.resourceTypeEntity.mandatoryProperties as string[]) || [];
+      
+      if (mandatoryProps.length > 0) {
+        const validation = validateMandatoryProperties(legacyProperties, mandatoryProps);
+        
+        if (!validation.isValid) {
+          return NextResponse.json(
+            { 
+              error: `Missing required properties: ${validation.missingProperties.join(', ')}`,
+              code: 'MISSING_MANDATORY_PROPERTIES',
+              details: {
+                missingProperties: validation.missingProperties,
+                errors: validation.errors
+              }
+            },
+            { status: 400 }
+          );
+        }
+      }
+    }
+
+    // Check if resource has a property schema
+    const propertySchema = (resource.propertySchema as any[]) || [];
+    
+    if (propertySchema.length > 0) {
+      // Use new service with property validation
+      try {
+        const item = await createResourceItem(
+          resourceId,
+          { properties: legacyProperties, status: status || 'AVAILABLE' },
+          user.id
+        );
+        return NextResponse.json(item, { status: 201 });
+      } catch (error: any) {
+        if (error.message.includes('Property validation failed')) {
+          return NextResponse.json(
+            { error: error.message },
+            { status: 400 }
+          );
+        }
+        throw error;
+      }
+    }
+
+    // Fallback to legacy creation for resources without property schema
     const item = await prisma.$transaction(async (tx) => {
-      // Create resource item
       const newItem = await tx.resourceItem.create({
         data: {
           resourceId,
-          // Common fields
           serialNumber,
           purchaseDate: purchaseDate ? new Date(purchaseDate) : null,
           warrantyExpiry: warrantyExpiry ? new Date(warrantyExpiry) : null,
           value: value ? parseFloat(value) : null,
           metadata: metadata || null,
           status: 'AVAILABLE',
-          
-          // Hardware-specific fields (only for PHYSICAL resources)
+          properties: JSON.parse(JSON.stringify(legacyProperties)),
           ...(resource.type === 'PHYSICAL' && {
             hostname,
             ipAddress,
@@ -196,8 +377,6 @@ export async function POST(request: NextRequest) {
             memory,
             storage
           }),
-          
-          // Software-specific fields (only for SOFTWARE resources)
           ...(resource.type === 'SOFTWARE' && {
             licenseKey,
             softwareVersion,
@@ -214,7 +393,6 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      // Log audit trail
       await tx.auditLog.create({
         data: {
           entityType: 'RESOURCE',
@@ -230,27 +408,20 @@ export async function POST(request: NextRequest) {
         }
       });
 
-      // Log activity timeline
       await tx.activityTimeline.create({
         data: {
           entityType: 'RESOURCE',
           entityId: resourceId,
           activityType: 'CREATED',
           title: `New ${resource.name} item added`,
-          description: `Hardware item ${serialNumber || hostname || 'without serial'} added to inventory`,
+          description: `Resource item ${serialNumber || hostname || 'without serial'} added to inventory`,
           performedBy: user.id,
           resourceId,
           metadata: {
             itemId: newItem.id,
             serialNumber,
             hostname,
-            customMetadata: metadata,
-            specifications: {
-              operatingSystem,
-              processor,
-              memory,
-              storage
-            }
+            customMetadata: metadata
           }
         }
       });
@@ -266,7 +437,5 @@ export async function POST(request: NextRequest) {
       { error: 'Failed to create resource item' },
       { status: 500 }
     );
-  } finally {
-    await prisma.$disconnect();
   }
 }

@@ -43,11 +43,14 @@ export default function ResourceAssignmentForm({
     notes: ''
   });
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Determine assignment logic for physical and software resources
-  const hasItems = (resourceType === 'PHYSICAL' || resourceType === 'SOFTWARE') && availableItems.length > 0;
-  const canAssignDirectly = (resourceType !== 'PHYSICAL' && resourceType !== 'SOFTWARE') || availableItems.length === 0;
+  const totalItems = availableItems.length;
+  const hasItems = (resourceType === 'PHYSICAL' || resourceType === 'SOFTWARE') && totalItems > 0;
+  const canAssignDirectly = false; // Resources without items cannot be assigned directly anymore
   const availableResourceItems = availableItems.filter(item => item.status === 'AVAILABLE');
+  const noItemsExist = totalItems === 0;
 
   useEffect(() => {
     fetchEmployees();
@@ -72,6 +75,7 @@ export default function ResourceAssignmentForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
+    setError(null);
 
     try {
       const response = await fetch('/api/resources/assignments/assign', {
@@ -91,10 +95,12 @@ export default function ResourceAssignmentForm({
         onAssignmentCreated?.();
         onClose?.();
       } else {
-        console.error('Failed to create assignment');
+        const errorData = await response.json();
+        setError(errorData.error || 'Failed to create assignment');
       }
     } catch (error) {
       console.error('Error creating assignment:', error);
+      setError('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -114,8 +120,8 @@ export default function ResourceAssignmentForm({
     description: `Status: ${item.status}${resourceType === 'SOFTWARE' && item.softwareVersion ? ` • Version: ${item.softwareVersion}` : ''}`
   }));
 
-  // Form validation
-  const isFormValid = formData.employeeId && (canAssignDirectly || (hasItems && formData.itemId && availableResourceItems.length > 0));
+  // Form validation - cannot assign if no items exist
+  const isFormValid = !noItemsExist && formData.employeeId && (resourceType === 'CLOUD' || (hasItems && formData.itemId && availableResourceItems.length > 0));
 
   return (
     <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50">
@@ -133,6 +139,21 @@ export default function ResourceAssignmentForm({
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Error Message */}
+          {error && (
+            <div className="bg-red-50 border border-red-200 rounded-lg p-4">
+              <div className="flex items-start space-x-2">
+                <svg className="w-5 h-5 text-red-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z" />
+                </svg>
+                <div>
+                  <p className="text-sm font-medium text-red-800">Assignment Failed</p>
+                  <p className="text-sm text-red-700 mt-1">{error}</p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Assignment Type Info */}
           {(resourceType === 'PHYSICAL' || resourceType === 'SOFTWARE') && (
             <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
